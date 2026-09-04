@@ -1,0 +1,1331 @@
+<title>Static Fire Bench</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#EDECE6; --panel:#E2E0D6; --card:#F8F7F3; --card-2:#FBFAF7;
+    --ink-primary:#1A1815; --ink-secondary:#5B564C; --ink-muted:#8B8579;
+    --border: rgba(26,24,21,0.12); --border-strong: rgba(26,24,21,0.22);
+    --accent:#D9601F; --accent-ink:#241000; --accent-soft: rgba(217,96,31,0.14);
+    --series-thrust:#D9601F; --series-pressure:#2a78d6; --series-mass:#1baf7a;
+    --series-altitude:#2a78d6; --series-velocity:#1baf7a;
+    --status-good:#0ca30c; --status-critical:#d03b3b;
+    --chart-grid: rgba(26,24,21,0.10); --chart-baseline: rgba(26,24,21,0.30);
+    --tooltip-bg:#1A1815; --tooltip-ink:#F2EFE9;
+    --focus: #2a78d6;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]) {
+      --bg:#15191B; --panel:#0F1315; --card:#1D2225; --card-2:#20262A;
+      --ink-primary:#F2EFE9; --ink-secondary:#B7B2A6; --ink-muted:#726E64;
+      --border: rgba(242,239,233,0.12); --border-strong: rgba(242,239,233,0.24);
+      --accent:#E67337; --accent-ink:#1B0C00; --accent-soft: rgba(230,115,55,0.16);
+      --series-thrust:#E67337; --series-pressure:#3987e5; --series-mass:#199e70;
+      --series-altitude:#3987e5; --series-velocity:#199e70;
+      --chart-grid: rgba(242,239,233,0.10); --chart-baseline: rgba(242,239,233,0.28);
+      --tooltip-bg:#F2EFE9; --tooltip-ink:#15191B;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#15191B; --panel:#0F1315; --card:#1D2225; --card-2:#20262A;
+    --ink-primary:#F2EFE9; --ink-secondary:#B7B2A6; --ink-muted:#726E64;
+    --border: rgba(242,239,233,0.12); --border-strong: rgba(242,239,233,0.24);
+    --accent:#E67337; --accent-ink:#1B0C00; --accent-soft: rgba(230,115,55,0.16);
+    --series-thrust:#E67337; --series-pressure:#3987e5; --series-mass:#199e70;
+    --series-altitude:#3987e5; --series-velocity:#199e70;
+    --chart-grid: rgba(242,239,233,0.10); --chart-baseline: rgba(242,239,233,0.28);
+    --tooltip-bg:#F2EFE9; --tooltip-ink:#15191B;
+    color-scheme: dark;
+  }
+
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:var(--bg); color:var(--ink-primary);
+    font-family:"IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size:14px; line-height:1.5;
+  }
+  h1,h2,h3,.label-face{ font-family:"Barlow Condensed","Arial Narrow",sans-serif; }
+  .mono{ font-family:"IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  a{ color:var(--accent); }
+  button{ font-family:inherit; }
+  :focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+
+  .wrap{ max-width:1240px; margin:0 auto; padding:20px 20px 40px; }
+
+  /* ---------- Header ---------- */
+  header.top{
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding:14px 18px; margin-bottom:16px;
+    background:var(--card); border:1px solid var(--border); border-radius:10px;
+  }
+  .plate{ display:flex; align-items:baseline; gap:12px; }
+  .plate h1{
+    margin:0; font-size:26px; font-weight:700; letter-spacing:0.02em; text-transform:uppercase;
+  }
+  .plate .sub{
+    font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-muted);
+  }
+  .mode-toggle{
+    display:flex; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:3px; gap:2px;
+  }
+  .mode-toggle button{
+    border:0; background:transparent; color:var(--ink-secondary); cursor:pointer;
+    font-family:"Barlow Condensed",sans-serif; font-weight:600; letter-spacing:0.08em;
+    text-transform:uppercase; font-size:13px; padding:8px 16px; border-radius:6px;
+  }
+  .mode-toggle button.active{ background:var(--accent); color:var(--accent-ink); }
+
+  /* ---------- Fuel select ---------- */
+  .fuel-select{ margin-bottom:16px; }
+  .fs-title{ font-size:13px; letter-spacing:0.12em; text-transform:uppercase; color:var(--ink-muted); margin:0 0 10px; font-weight:600; }
+  .fuel-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  @media (max-width:860px){ .fuel-grid{ grid-template-columns:repeat(2,1fr); } }
+  .fuel-card{
+    all:unset; box-sizing:border-box; display:block; width:100%; cursor:pointer;
+    background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px;
+    transition:border-color .15s, box-shadow .15s;
+  }
+  .fuel-card:hover{ border-color:var(--border-strong); }
+  .fuel-card.selected{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .fuel-card .fc-name{ font-family:"Barlow Condensed",sans-serif; font-weight:700; font-size:16px; text-transform:uppercase; letter-spacing:0.02em; display:flex; align-items:center; }
+  .fuel-card .fc-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; flex:none; }
+  .fuel-card .fc-formula{ font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--ink-muted); margin:2px 0 0 15px; }
+  .fuel-card .fc-blurb{ font-size:12px; color:var(--ink-secondary); margin-top:9px; line-height:1.5; }
+  .fuel-card .fc-chips{ display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
+  .fuel-card .fc-chip{ font-size:9.5px; letter-spacing:0.04em; text-transform:uppercase; padding:3px 7px; border-radius:5px; background:var(--panel); color:var(--ink-secondary); border:1px solid var(--border); }
+  .fuel-card.selected .fc-chip{ background:var(--accent-soft); color:var(--accent); border-color:transparent; }
+
+  /* ---------- Layout ---------- */
+  .layout{ display:grid; grid-template-columns: 340px 1fr; gap:16px; align-items:start; }
+  @media (max-width: 980px){ .layout{ grid-template-columns: 1fr; } }
+
+  .rail, .console-card{
+    background:var(--card); border:1px solid var(--border); border-radius:10px;
+  }
+  .rail{ padding:16px; display:flex; flex-direction:column; gap:18px; }
+  .group h2{
+    margin:0 0 10px; font-size:14px; font-weight:600; letter-spacing:0.1em;
+    text-transform:uppercase; color:var(--ink-secondary);
+    display:flex; align-items:center; gap:8px;
+  }
+  .group h2::before{ content:""; width:6px; height:6px; border-radius:50%; background:var(--accent); display:inline-block; }
+
+  .field-row{ display:grid; grid-template-columns: 1fr auto; gap:2px 10px; align-items:center; padding:7px 0; border-bottom:1px dashed var(--border); }
+  .field-row:last-child{ border-bottom:0; }
+  .field-row .f-label{ font-size:12.5px; color:var(--ink-secondary); }
+  .field-row .f-readout{ font-size:12.5px; text-align:right; color:var(--ink-primary); white-space:nowrap; }
+  .field-row .f-readout .unit{ color:var(--ink-muted); font-size:11px; margin-left:3px; }
+  .field-row input[type=range]{
+    grid-column:1 / -1; width:100%; height:18px; margin:2px 0 0; appearance:none; background:transparent; cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-runnable-track{ height:4px; background:var(--panel); border-radius:2px; border:1px solid var(--border); }
+  input[type=range]::-webkit-slider-thumb{
+    appearance:none; width:14px; height:14px; margin-top:-6px; border-radius:50%;
+    background:var(--accent); border:2px solid var(--card);
+    box-shadow:0 0 0 1px var(--border-strong);
+  }
+  input[type=range]::-moz-range-track{ height:4px; background:var(--panel); border-radius:2px; border:1px solid var(--border); }
+  input[type=range]::-moz-range-thumb{ width:12px; height:12px; border-radius:50%; background:var(--accent); border:2px solid var(--card); }
+
+  .toggle-row{ display:flex; align-items:center; justify-content:space-between; padding:8px 0 2px; }
+  .toggle-row .f-label{ font-size:12.5px; color:var(--ink-secondary); }
+  .switch{ position:relative; width:36px; height:20px; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .switch .track{ position:absolute; inset:0; background:var(--panel); border:1px solid var(--border); border-radius:12px; transition:background .15s; }
+  .switch .knob{ position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:var(--ink-muted); transition:transform .15s, background .15s; }
+  .switch input:checked + .track{ background:var(--accent-soft); border-color:var(--accent); }
+  .switch input:checked + .track .knob{ transform:translateX(16px); background:var(--accent); }
+
+  .preview-box{
+    background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 12px;
+    display:grid; grid-template-columns:1fr 1fr; gap:6px 14px;
+  }
+  .preview-box .pv{ display:flex; justify-content:space-between; gap:8px; font-size:12px; }
+  .preview-box .pv b{ font-weight:600; }
+  .preview-box .pv .k{ color:var(--ink-muted); }
+  .preview-warn{ grid-column:1/-1; color:var(--status-critical); font-size:11.5px; font-weight:600; }
+
+  .fire-btn{
+    border:1px solid var(--border-strong); background:var(--accent); color:var(--accent-ink);
+    font-family:"Barlow Condensed",sans-serif; font-weight:700; font-size:18px; letter-spacing:0.1em;
+    text-transform:uppercase; padding:13px; border-radius:8px; cursor:pointer;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+  .fire-btn:active{ transform:translateY(1px); box-shadow:none; }
+  .fire-btn:disabled{ opacity:0.5; cursor:not-allowed; }
+  .reset-btn{
+    border:1px solid var(--border); background:transparent; color:var(--ink-secondary);
+    font-family:"Barlow Condensed",sans-serif; font-weight:600; font-size:13px; letter-spacing:0.08em;
+    text-transform:uppercase; padding:9px; border-radius:8px; cursor:pointer;
+  }
+  .rail-actions{ display:flex; flex-direction:column; gap:8px; }
+
+  /* ---------- Console ---------- */
+  .console-card{ padding:18px; display:flex; flex-direction:column; gap:16px; }
+  .status-strip{ display:grid; grid-template-columns:repeat(4,1fr); gap:10px; }
+  @media (max-width:640px){ .status-strip{ grid-template-columns:repeat(2,1fr); } }
+  .tile{ background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+  .tile .t-label{ font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-muted); }
+  .tile .t-value{ font-size:22px; font-weight:500; margin-top:2px; }
+  .tile .t-value .unit{ font-size:12px; color:var(--ink-muted); margin-left:4px; }
+
+  .phase-chip{
+    display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:600;
+    letter-spacing:0.08em; text-transform:uppercase; padding:4px 10px; border-radius:999px;
+    background:var(--panel); border:1px solid var(--border); color:var(--ink-secondary);
+  }
+  .phase-chip.burn{ background:var(--accent); color:var(--accent-ink); border-color:transparent; }
+  .phase-chip.coast{ background:var(--panel); color:var(--ink-secondary); }
+  .phase-chip.descent{ background:var(--series-altitude); color:#fff; border-color:transparent; }
+  .phase-chip.done{ background:var(--status-good); color:#fff; border-color:transparent; }
+
+  .glyph-panel{
+    display:flex; align-items:center; justify-content:center; gap:24px;
+    background:var(--panel); border:1px solid var(--border); border-radius:8px; min-height:190px; padding:14px;
+  }
+  canvas.flame-canvas{ width:150px; height:170px; }
+  .rail-track{ position:relative; width:56px; height:170px; border-left:2px solid var(--chart-baseline); }
+  .rail-track .tick{ position:absolute; left:-2px; width:8px; border-top:1px solid var(--chart-baseline); font-size:0; }
+  .rail-track .apogee-line{ position:absolute; left:-2px; right:-40px; border-top:1px dashed var(--series-altitude); }
+  .rail-track .apogee-label{ position:absolute; left:12px; font-size:10px; color:var(--series-altitude); font-family:"IBM Plex Mono",monospace; white-space:nowrap; }
+  .rocket-icon{ position:absolute; left:-11px; width:24px; height:40px; transform:translateY(50%); }
+  .rocket-icon svg{ width:100%; height:100%; overflow:visible; }
+
+  .throttle-panel{ display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .throttle-label{ font-size:10.5px; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-muted); }
+  .vert-slider-wrap{ width:40px; height:130px; position:relative; }
+  .vert-slider-wrap input[type=range]{
+    position:absolute; top:50%; left:50%; width:110px; height:22px;
+    transform:translate(-50%,-50%) rotate(-90deg); margin:0;
+  }
+  .throttle-value{ font-size:19px; font-weight:600; }
+  .cutoff-btn{
+    border:1px solid var(--status-critical); background:transparent; color:var(--status-critical);
+    font-family:"Barlow Condensed",sans-serif; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
+    padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px;
+  }
+  .cutoff-btn:hover:not(:disabled){ background:var(--status-critical); color:#fff; }
+  .cutoff-btn:disabled{ opacity:0.35; cursor:not-allowed; }
+
+  .chart-block{ display:flex; flex-direction:column; gap:4px; }
+  .chart-head{ display:flex; align-items:baseline; justify-content:space-between; }
+  .chart-head .c-label{ font-size:11.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-secondary); font-weight:600; }
+  .chart-head .c-value{ font-size:14px; font-weight:600; }
+  .chart-wrap{ position:relative; width:100%; height:108px; background:var(--card-2); border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+  .chart-wrap canvas{ position:absolute; inset:0; width:100%; height:100%; }
+
+  .summary-card{
+    border-top:1px solid var(--border); padding-top:14px; margin-top:2px;
+  }
+  .summary-card h3{
+    margin:0 0 10px; font-size:15px; text-transform:uppercase; letter-spacing:0.08em; font-weight:700;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .designation{
+    font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:14px;
+    background:var(--accent-soft); color:var(--accent); padding:3px 10px; border-radius:6px;
+    letter-spacing:0.03em;
+  }
+  .spec-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  @media (max-width:760px){ .spec-grid{ grid-template-columns:repeat(2,1fr); } }
+  .spec-cell{ background:var(--card); padding:10px 12px; }
+  .spec-cell .s-label{ font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-muted); }
+  .spec-cell .s-value{ font-size:16px; font-weight:600; margin-top:2px; }
+  .spec-cell .s-value .unit{ font-size:11px; font-weight:400; color:var(--ink-muted); margin-left:3px; }
+  .badge-critical{ display:inline-block; margin-top:4px; font-size:10.5px; font-weight:700; letter-spacing:0.05em; color:#fff; background:var(--status-critical); padding:2px 8px; border-radius:5px; text-transform:uppercase; }
+
+  [hidden]{ display:none !important; }
+
+  footer.notes{
+    max-width:65ch; margin:32px auto 0; color:var(--ink-secondary); font-size:12.5px; line-height:1.65;
+  }
+  footer.notes h3{ font-size:12px; text-transform:uppercase; letter-spacing:0.1em; color:var(--ink-muted); margin:0 0 6px; }
+  footer.notes p{ margin:0 0 10px; }
+  footer.notes code{ font-family:"IBM Plex Mono",monospace; font-size:11.5px; background:var(--panel); padding:1px 5px; border-radius:4px; }
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <div class="plate">
+      <h1>Static Fire Bench</h1>
+      <span class="sub">SRM &amp; Liquid Engine Console</span>
+    </div>
+    <div class="mode-toggle" role="group" aria-label="Mode">
+      <button id="mode-stand" class="active" type="button">Test Stand</button>
+      <button id="mode-launch" type="button">Launch</button>
+    </div>
+  </header>
+
+  <section class="fuel-select">
+    <h2 class="fs-title">Select Propellant</h2>
+    <div class="fuel-grid" id="fuel-grid"></div>
+  </section>
+
+  <div class="layout">
+
+    <!-- ================= LEFT RAIL : CONTROLS ================= -->
+    <div class="rail">
+
+      <div class="group" id="grain-group">
+        <h2>Grain (BATES)</h2>
+        <div id="fields-grain"></div>
+        <div class="toggle-row">
+          <span class="f-label">Ends Burn</span>
+          <label class="switch">
+            <input type="checkbox" id="burn-ends-toggle" checked>
+            <span class="track"><span class="knob"></span></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="group" id="liquid-group" hidden>
+        <h2>Liquid Engine</h2>
+        <div id="fields-liquidEngine"></div>
+      </div>
+
+      <div class="group">
+        <h2>Nozzle</h2>
+        <div id="fields-nozzle"></div>
+      </div>
+
+      <div class="group" id="vehicle-group" hidden>
+        <h2>Vehicle</h2>
+        <div id="fields-vehicle"></div>
+      </div>
+
+      <div class="group" id="parachute-group" hidden>
+        <h2>Recovery</h2>
+        <div id="fields-parachute"></div>
+      </div>
+
+      <div class="group">
+        <h2 id="preview-title">Pre-Fire Readout</h2>
+        <div class="preview-box" id="preview-box"></div>
+      </div>
+
+      <div class="rail-actions">
+        <button class="fire-btn" id="fire-btn" type="button">Ignite</button>
+        <button class="reset-btn" id="reset-btn" type="button">Reset</button>
+      </div>
+
+    </div>
+
+    <!-- ================= RIGHT : CONSOLE ================= -->
+    <div class="console-card">
+
+      <div class="status-strip">
+        <div class="tile">
+          <div class="t-label">Phase</div>
+          <div class="t-value"><span class="phase-chip" id="phase-chip">Standby</span></div>
+        </div>
+        <div class="tile">
+          <div class="t-label">Mission Time</div>
+          <div class="t-value mono" id="t-time">0.00<span class="unit">s</span></div>
+        </div>
+        <div class="tile">
+          <div class="t-label" id="t-hero1-label">Thrust</div>
+          <div class="t-value mono" id="t-hero1">0.0<span class="unit">N</span></div>
+        </div>
+        <div class="tile">
+          <div class="t-label" id="t-hero2-label">Chamber P</div>
+          <div class="t-value mono" id="t-hero2">0.00<span class="unit">MPa</span></div>
+        </div>
+      </div>
+
+      <div class="glyph-panel">
+        <canvas class="flame-canvas" id="flame-canvas" width="170" height="170"></canvas>
+        <div class="throttle-panel" id="throttle-panel" hidden>
+          <div class="throttle-label">Throttle</div>
+          <div class="vert-slider-wrap"><input type="range" id="throttle-slider" min="0" max="100" step="1" value="100"></div>
+          <div class="throttle-value mono" id="throttle-value">100%</div>
+          <button class="cutoff-btn" id="cutoff-btn" type="button" disabled>Cutoff</button>
+        </div>
+        <div class="rail-track" id="rail-track" hidden>
+          <div class="rocket-icon" id="rocket-icon" style="bottom:0%">
+            <svg viewBox="0 0 24 40">
+              <path d="M12 0 L18 14 L18 30 L6 30 L6 14 Z" fill="var(--ink-secondary)"/>
+              <path d="M6 24 L0 34 L6 30 Z" fill="var(--series-thrust)"/>
+              <path d="M18 24 L24 34 L18 30 Z" fill="var(--series-thrust)"/>
+              <circle cx="12" cy="12" r="3" fill="var(--card-2)"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div id="charts-holder"></div>
+
+      <div class="summary-card" id="summary-card" hidden>
+        <h3><span id="summary-title">Motor Data Card</span><span class="designation" id="summary-designation">—</span></h3>
+        <div class="spec-grid" id="spec-grid"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer class="notes">
+    <h3>How this is modeled</h3>
+    <p>Solid propellant is a BATES-style grain feeding a convergent&#8209;divergent nozzle. Burn rate follows Saint Robert&rsquo;s law <code>r&nbsp;=&nbsp;a&middot;Pc&#8319;</code>; chamber pressure is solved from the quasi&#8209;steady balance between propellant burning off the grain and gas leaving the throat &mdash; there is no throttle and no shutoff, because there is nothing to command once the grain is lit.</p>
+    <p>Liquid engines (RP-1, CH&#8324;, LH&#8322;) skip the grain entirely: chamber pressure is a feed-system design choice, scaled live by the throttle you drag during the hotfire, and you can command a cutoff before the tank runs dry. In both cases thrust comes from the same nozzle physics: the real isentropic area&#8209;Mach relation, so climbing to thinner air genuinely increases thrust a little.</p>
+    <p>Flight is a deliberately simple 1&#8209;D vertical ascent (RK4 integration): constant gravity, an exponential atmosphere, quadratic drag, and a parachute that takes over after apogee. Launch always runs the liquid engine at full throttle. Numbers are illustrative, not certified hardware &mdash; defaults mirror the <code>rocket-sim</code> Python project&rsquo;s example configs.</p>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ============================================================
+     PHYSICS ENGINE — nozzle/atmosphere core mirrors rocket_sim/*.py
+  ============================================================ */
+  const GRAVITY = 9.80665;
+  const SEA_LEVEL_DENSITY = 1.225;
+  const SEA_LEVEL_PRESSURE = 101325;
+  const SCALE_HEIGHT = 8500;
+
+  const airDensity = h => SEA_LEVEL_DENSITY * Math.exp(-Math.max(h,0)/SCALE_HEIGHT);
+  const ambientPressure = h => SEA_LEVEL_PRESSURE * Math.exp(-Math.max(h,0)/SCALE_HEIGHT);
+  const burnRate = (p, pc) => pc <= 0 ? 0 : p.a * Math.pow(pc, p.n);
+
+  const webMax = g => Math.min((g.outerD - g.coreD)/2, g.burnEnds ? g.length/2 : Infinity);
+  const isBurnedOut = (g,w) => w >= webMax(g);
+  function burningArea(g,w){
+    if(isBurnedOut(g,w)) return 0;
+    const coreD = g.coreD + 2*w;
+    const length = g.length - (g.burnEnds ? 2*w : 0);
+    const lateral = Math.PI * coreD * length;
+    const ends = g.burnEnds ? 2*(Math.PI/4)*(g.outerD**2 - coreD**2) : 0;
+    return g.numSegments * (lateral + ends);
+  }
+  function propVolume(g,w){
+    if(isBurnedOut(g,w)) return 0;
+    const coreD = g.coreD + 2*w;
+    const length = Math.max(g.length - (g.burnEnds ? 2*w : 0), 0);
+    const area = (Math.PI/4)*(g.outerD**2 - coreD**2);
+    return g.numSegments * area * length;
+  }
+
+  const throatArea = n => Math.PI/4 * n.throatD**2;
+  const exitArea = n => Math.PI/4 * n.exitD**2;
+  const areaRatio = n => exitArea(n)/throatArea(n);
+
+  const areaRatioFromMach = (m,k) => (1/m) * ((2/(k+1)) * (1 + (k-1)/2*m*m)) ** ((k+1)/(2*(k-1)));
+  function solveExitMach(eps,k){
+    let lo = 1 + 1e-6, hi = 15;
+    if(eps <= areaRatioFromMach(lo,k)) return lo;
+    for(let i=0;i<100;i++){
+      const mid = (lo+hi)/2;
+      if(areaRatioFromMach(mid,k) < eps) lo = mid; else hi = mid;
+    }
+    return (lo+hi)/2;
+  }
+
+  function makeMotor(propellant, grain, nozzle){
+    return { propellant, grain, nozzle, exitMach: solveExitMach(areaRatio(nozzle), propellant.k) };
+  }
+  function chamberPressure(motor, ab){
+    if(ab <= 0) return 0;
+    const p = motor.propellant, At = throatArea(motor.nozzle);
+    const base = ab * p.a * p.density * p.cstar / At;
+    return Math.pow(base, 1/(1-p.n));
+  }
+  function exitPressure(motor, pc){
+    const k = motor.propellant.k, m = motor.exitMach;
+    return pc * Math.pow(1 + (k-1)/2*m*m, -k/(k-1));
+  }
+  function thrustCoefficient(motor, pc, pa){
+    if(pc <= 0) return 0;
+    const k = motor.propellant.k;
+    const pe = exitPressure(motor, pc);
+    const momentum = Math.sqrt( (2*k*k/(k-1)) * Math.pow(2/(k+1), (k+1)/(k-1)) * (1 - Math.pow(pe/pc, (k-1)/k)) );
+    const pressureTerm = (pe - pa) * areaRatio(motor.nozzle) / pc;
+    return motor.nozzle.efficiency * (momentum + pressureTerm);
+  }
+  const thrustN = (motor, pc, pa) => thrustCoefficient(motor, pc, pa) * throatArea(motor.nozzle) * pc;
+  const massFlow = (motor, pc) => pc <= 0 ? 0 : pc * throatArea(motor.nozzle) / motor.propellant.cstar;
+
+  function stateAtWeb(motor, w, pa){
+    const ab = burningArea(motor.grain, w);
+    const pc = chamberPressure(motor, ab);
+    return {
+      w, ab, pc, mdot: massFlow(motor, pc), thrust: thrustN(motor, pc, pa),
+      propMass: propVolume(motor.grain, w) * motor.propellant.density,
+      kn: ab > 0 ? ab/throatArea(motor.nozzle) : 0,
+    };
+  }
+  const propellantMassInitial = motor => propVolume(motor.grain, 0) * motor.propellant.density;
+
+  function runTestStand(motor, dt){
+    let t=0, w=0;
+    const wmax = webMax(motor.grain);
+    const points = [];
+    while(w < wmax){
+      const s = stateAtWeb(motor, w, SEA_LEVEL_PRESSURE);
+      points.push({ t, ...s });
+      if(s.pc <= 0) break;
+      w += burnRate(motor.propellant, s.pc) * dt;
+      t += dt;
+    }
+    points.push({ t, w:wmax, ab:0, pc:0, mdot:0, thrust:0, propMass:0, kn:0 });
+    return points;
+  }
+
+  function classifyMotor(impulse){
+    if(impulse <= 0) return "N/A";
+    const letters = "ABCDEFGHIJKLMNOP";
+    let idx = Math.floor(Math.log2(impulse/1.25));
+    idx = Math.max(0, Math.min(idx, letters.length-1));
+    return letters[idx];
+  }
+  function summarizeTestStand(points, dt){
+    const impulse = points.slice(0,-1).reduce((s,p)=>s+p.thrust,0) * dt;
+    const burnTime = points[points.length-1].t;
+    const avgThrust = burnTime > 0 ? impulse/burnTime : 0;
+    const peakThrust = Math.max(...points.map(p=>p.thrust));
+    const peakPc = Math.max(...points.map(p=>p.pc));
+    const peakKn = Math.max(...points.map(p=>p.kn));
+    const propMass0 = points[0].propMass;
+    const isp = propMass0 > 0 ? impulse/(propMass0*GRAVITY) : 0;
+    const cls = classifyMotor(impulse);
+    return { impulse, burnTime, avgThrust, peakThrust, peakPc, peakKn, propMass0, isp,
+              designation: cls === "N/A" ? "N/A" : cls + Math.round(avgThrust) };
+  }
+
+  /* ---- generic helpers so flight code doesn't care whether the engine is solid or liquid ---- */
+  function motorBurnoutBound(motor){
+    return motor.type === "solid" ? webMax(motor.grain) : motor.propellantLoad;
+  }
+  function motorIsBurnedOut(motor, w){
+    return motor.type === "solid" ? isBurnedOut(motor.grain, w) : w >= motor.propellantLoad - 1e-9;
+  }
+  function motorInitialState(motor, pa){
+    if(motor.type === "solid"){
+      const s = stateAtWeb(motor, 0, pa);
+      return { thrust: s.thrust, propMass: s.propMass };
+    }
+    return { thrust: thrustN(motor, motor.pcDesign, pa), propMass: motor.propellantLoad };
+  }
+
+  function derivative(vehicle, h, v, w, apogeeReached){
+    const motor = vehicle.engine;
+    const pa = ambientPressure(h);
+    let thrust=0, dw=0, propMass=0;
+    if(!motorIsBurnedOut(motor, w)){
+      if(motor.type === "solid"){
+        const s = stateAtWeb(motor, w, pa);
+        thrust = vehicle.numEngines * s.thrust;
+        dw = burnRate(motor.propellant, s.pc);
+        propMass = vehicle.numEngines * s.propMass;
+      } else {
+        // launch always runs a liquid engine at full throttle — see footer note
+        const pc = motor.pcDesign;
+        thrust = vehicle.numEngines * thrustN(motor, pc, pa);
+        dw = massFlow(motor, pc);
+        propMass = vehicle.numEngines * (motor.propellantLoad - w);
+      }
+    }
+    const mass = vehicle.dryMass + propMass;
+    let cd, area;
+    if(v < 0 && apogeeReached && vehicle.parachute){
+      cd = vehicle.parachute.cd; area = Math.PI/4*vehicle.parachute.diameter**2;
+    } else {
+      cd = vehicle.cd; area = Math.PI/4*vehicle.diameter**2;
+    }
+    const rho = airDensity(h);
+    const sign = v >= 0 ? 1 : -1;
+    const drag = sign * 0.5 * rho * v*v * cd * area;
+    const accel = (thrust - drag - mass*GRAVITY) / mass;
+    return { dh:v, dv:accel, dw, thrust, mass };
+  }
+  function simulateFlight(vehicle, dt, maxTime){
+    const wmax = motorBurnoutBound(vehicle.engine);
+    let t=0, h=0, v=0, w=0, apogeeReached=false;
+    const points = [];
+    while(t <= maxTime){
+      const d = derivative(vehicle, h, v, w, apogeeReached);
+      const burnedOut = motorIsBurnedOut(vehicle.engine, w);
+      const phase = !burnedOut ? "burn" : (apogeeReached ? "descent" : "coast");
+      points.push({ t, h, v, a:d.dv, thrust:d.thrust, mass:d.mass, phase });
+      if(t > 0 && h <= 0 && v <= 0) break;
+      const k1 = [d.dh, d.dv, d.dw];
+      const d2 = derivative(vehicle, h+k1[0]*dt/2, v+k1[1]*dt/2, w+k1[2]*dt/2, apogeeReached);
+      const k2 = [d2.dh, d2.dv, d2.dw];
+      const d3 = derivative(vehicle, h+k2[0]*dt/2, v+k2[1]*dt/2, w+k2[2]*dt/2, apogeeReached);
+      const k3 = [d3.dh, d3.dv, d3.dw];
+      const d4 = derivative(vehicle, h+k3[0]*dt, v+k3[1]*dt, w+k3[2]*dt, apogeeReached);
+      const k4 = [d4.dh, d4.dv, d4.dw];
+      let hNext = h + (dt/6)*(k1[0]+2*k2[0]+2*k3[0]+k4[0]);
+      let vNext = v + (dt/6)*(k1[1]+2*k2[1]+2*k3[1]+k4[1]);
+      let wNext = w + (dt/6)*(k1[2]+2*k2[2]+2*k3[2]+k4[2]);
+      if(!apogeeReached && vNext < 0 && v >= 0) apogeeReached = true;
+      w = Math.max(0, Math.min(wNext, wmax));
+      h = Math.max(hNext, 0);
+      v = vNext;
+      t += dt;
+    }
+    return points;
+  }
+  function summarizeFlight(points, vehicle){
+    const burnout = points.find(p=>p.phase!=="burn") || points[points.length-1];
+    let apogee = points[0];
+    for(const p of points) if(p.h > apogee.h) apogee = p;
+    const maxV = Math.max(...points.map(p=>p.v));
+    const maxAccelG = Math.max(...points.map(p=>p.a)) / GRAVITY;
+    const landing = points[points.length-1];
+    const init = motorInitialState(vehicle.engine, SEA_LEVEL_PRESSURE);
+    const liftoffMass = vehicle.dryMass + vehicle.numEngines*init.propMass;
+    const liftoffThrust = vehicle.numEngines*init.thrust;
+    const twr = liftoffThrust / (liftoffMass*GRAVITY);
+    return { burnout, apogee, maxV, maxAccelG, landing, twr };
+  }
+
+  /* ============================================================
+     FUEL PRESETS — the game's core choice
+  ============================================================ */
+  const FUEL_PRESETS = {
+    solid: { type:"solid", name:"Solid Propellant", formula:"AP / Al / HTPB", dot:"var(--ink-muted)",
+      blurb:"Fuel and oxidizer cast into one solid rubber-like grain — simple and storable, but once lit it cannot be throttled or stopped.",
+      chips:["No throttle","No shutoff","Baseline Isp"],
+      propellant:{ density:1750, a:3.63e-5, n:0.35, cstar:1500, k:1.20 } },
+    rp1: { type:"liquid", name:"Refined Kerosene", formula:"RP-1 / LOX", dot:"var(--accent)",
+      blurb:"Stays liquid at room temperature and gives high thrust density — the workhorse fuel for first-stage boosters.",
+      chips:["Throttleable","Storable","Good Isp"],
+      propellant:{ cstar:1770, k:1.21 } },
+    ch4: { type:"liquid", name:"Liquid Methane", formula:"CH₄ / LOX", dot:"var(--series-mass)",
+      blurb:"Burns cleaner than kerosene and is easier to manufacture on other planets — a next-generation fuel.",
+      chips:["Throttleable","Cryogenic","Higher Isp"],
+      propellant:{ cstar:1870, k:1.19 } },
+    lh2: { type:"liquid", name:"Liquid Hydrogen", formula:"LH₂ / LOX", dot:"var(--series-pressure)",
+      blurb:"Very high energy and a clean water byproduct, but needs extreme cold storage and bulky tanks.",
+      chips:["Throttleable","Deep cryo","Highest Isp"],
+      propellant:{ cstar:2350, k:1.13 } },
+  };
+
+  /* ============================================================
+     PARAMETER FIELD DEFINITIONS & STATE
+  ============================================================ */
+  const FIELD_DEFS = {
+    grain: [
+      {key:"outerD", label:"Outer Diameter", unit:"mm", min:20, max:80, step:1, value:38, decimals:0, toSI:v=>v/1000},
+      {key:"coreD", label:"Core Diameter", unit:"mm", min:5, max:30, step:1, value:12, decimals:0, toSI:v=>v/1000},
+      {key:"length", label:"Segment Length", unit:"mm", min:20, max:100, step:1, value:40, decimals:0, toSI:v=>v/1000},
+      {key:"numSegments", label:"Segments", unit:"", min:1, max:6, step:1, value:3, decimals:0},
+    ],
+    liquidEngine: [
+      {key:"propellantLoad", label:"Propellant Load", unit:"kg", min:0.1, max:8, step:0.1, value:0.4, decimals:1},
+      {key:"chamberPressureDesign", label:"Chamber Pressure", unit:"MPa", min:1.0, max:10.0, step:0.1, value:3.0, decimals:1, toSI:v=>v*1e6},
+    ],
+    nozzle: [
+      {key:"throatD", label:"Throat Diameter", unit:"mm", min:4, max:20, step:0.5, value:9, decimals:1, toSI:v=>v/1000},
+      {key:"exitD", label:"Exit Diameter", unit:"mm", min:10, max:50, step:1, value:27, decimals:0, toSI:v=>v/1000},
+      {key:"efficiency", label:"Efficiency", unit:"", min:0.80, max:0.99, step:0.01, value:0.92, decimals:2},
+    ],
+    vehicle: [
+      {key:"dryMass", label:"Dry Mass", unit:"kg", min:0.5, max:10, step:0.1, value:2.5, decimals:1},
+      {key:"diameter", label:"Body Diameter", unit:"mm", min:20, max:150, step:1, value:41, decimals:0, toSI:v=>v/1000},
+      {key:"cd", label:"Drag Coeff. Cd", unit:"", min:0.3, max:1.0, step:0.01, value:0.5, decimals:2},
+      {key:"numEngines", label:"Engines", unit:"", min:1, max:4, step:1, value:1, decimals:0},
+    ],
+    parachute: [
+      {key:"diameter", label:"Canopy Diameter", unit:"m", min:0.2, max:1.5, step:0.05, value:0.6, decimals:2},
+      {key:"cd", label:"Canopy Cd", unit:"", min:1.0, max:2.2, step:0.05, value:1.5, decimals:2},
+    ],
+  };
+
+  const values = {};
+  for(const group in FIELD_DEFS){
+    values[group] = {};
+    for(const f of FIELD_DEFS[group]) values[group][f.key] = f.value;
+  }
+  values.grain.burnEnds = true;
+
+  function siValue(group, key){
+    const def = FIELD_DEFS[group].find(f=>f.key===key);
+    const raw = values[group][key];
+    return def.toSI ? def.toSI(raw) : raw;
+  }
+  function buildMotor(){
+    const preset = FUEL_PRESETS[currentFuel];
+    const nozzle = { throatD: siValue("nozzle","throatD"), exitD: siValue("nozzle","exitD"),
+                      efficiency: siValue("nozzle","efficiency") };
+    if(preset.type === "solid"){
+      const propellant = { ...preset.propellant };
+      const grain = { outerD: siValue("grain","outerD"), coreD: siValue("grain","coreD"),
+                      length: siValue("grain","length"), numSegments: siValue("grain","numSegments"),
+                      burnEnds: values.grain.burnEnds };
+      return { ...makeMotor(propellant, grain, nozzle), type:"solid" };
+    }
+    const propellant = { cstar: preset.propellant.cstar, k: preset.propellant.k };
+    return {
+      ...makeMotor(propellant, null, nozzle), type:"liquid",
+      pcDesign: siValue("liquidEngine","chamberPressureDesign"),
+      propellantLoad: siValue("liquidEngine","propellantLoad"),
+    };
+  }
+  function buildVehicle(motor){
+    return {
+      dryMass: siValue("vehicle","dryMass"), diameter: siValue("vehicle","diameter"),
+      cd: siValue("vehicle","cd"), numEngines: siValue("vehicle","numEngines"), engine: motor,
+      parachute: { diameter: siValue("parachute","diameter"), cd: siValue("parachute","cd") },
+    };
+  }
+
+  /* ============================================================
+     CONTROL ROW BUILDER
+  ============================================================ */
+  function fmt(v, decimals){ return v.toFixed(decimals); }
+
+  function buildFieldRows(group){
+    const container = document.getElementById("fields-"+group);
+    for(const def of FIELD_DEFS[group]){
+      const row = document.createElement("div");
+      row.className = "field-row";
+      row.innerHTML =
+        '<span class="f-label">'+def.label+'</span>'+
+        '<span class="f-readout mono" id="readout-'+group+'-'+def.key+'">'+fmt(def.value,def.decimals)+(def.unit?' <span class="unit">'+def.unit+'</span>':'')+'</span>'+
+        '<input type="range" id="slider-'+group+'-'+def.key+'" min="'+def.min+'" max="'+def.max+'" step="'+def.step+'" value="'+def.value+'">';
+      container.appendChild(row);
+      const slider = row.querySelector("input");
+      const readout = row.querySelector(".f-readout");
+      slider.addEventListener("input", ()=>{
+        const v = parseFloat(slider.value);
+        values[group][def.key] = v;
+        readout.innerHTML = fmt(v,def.decimals) + (def.unit ? ' <span class="unit">'+def.unit+'</span>' : '');
+        updatePreview();
+      });
+    }
+  }
+  ["grain","liquidEngine","nozzle","vehicle","parachute"].forEach(buildFieldRows);
+
+  document.getElementById("burn-ends-toggle").addEventListener("change", e=>{
+    values.grain.burnEnds = e.target.checked;
+    updatePreview();
+  });
+
+  /* ============================================================
+     FUEL SELECTION UI
+  ============================================================ */
+  let currentFuel = "solid";
+  let engineType = "solid";
+  const grainGroupEl = document.getElementById("grain-group");
+  const liquidGroupEl = document.getElementById("liquid-group");
+  const fuelGrid = document.getElementById("fuel-grid");
+
+  for(const key in FUEL_PRESETS){
+    const f = FUEL_PRESETS[key];
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "fuel-card";
+    card.dataset.fuel = key;
+    card.innerHTML =
+      '<div class="fc-name"><span class="fc-dot" style="background:'+f.dot+'"></span>'+f.name+'</div>'+
+      '<div class="fc-formula">'+f.formula+'</div>'+
+      '<div class="fc-blurb">'+f.blurb+'</div>'+
+      '<div class="fc-chips">'+f.chips.map(c=>'<span class="fc-chip">'+c+'</span>').join("")+'</div>';
+    card.addEventListener("click", ()=>setFuel(key));
+    fuelGrid.appendChild(card);
+  }
+
+  function setFuel(key){
+    currentFuel = key;
+    engineType = FUEL_PRESETS[key].type;
+    document.querySelectorAll(".fuel-card").forEach(c=>c.classList.toggle("selected", c.dataset.fuel===key));
+    grainGroupEl.hidden = engineType !== "solid";
+    liquidGroupEl.hidden = engineType !== "liquid";
+    updateGlyphVisibility();
+    updateSummaryTitle();
+    resetConsole();
+    updatePreview();
+  }
+
+  /* ============================================================
+     PRE-FIRE PREVIEW (cheap, instant — no time integration)
+  ============================================================ */
+  function updatePreview(){
+    const box = document.getElementById("preview-box");
+    const motor = buildMotor();
+    let html = "";
+
+    if(engineType === "solid"){
+      const s0 = stateAtWeb(motor, 0, SEA_LEVEL_PRESSURE);
+      const wmax = webMax(motor.grain);
+      const propMass0 = propellantMassInitial(motor);
+      // order-of-magnitude only: uses the initial burn rate, ignoring how geometry evolves through the burn
+      const roughBurnTime = (s0.pc > 0 && wmax > 0) ? wmax / burnRate(motor.propellant, s0.pc) : 0;
+      if(wmax <= 0){
+        html += '<div class="preview-warn">⚠ core ≥ outer diameter — no propellant volume</div>';
+      } else {
+        html += pv("Initial Kn", s0.kn.toFixed(0), "");
+        html += pv("Prop. Mass", propMass0.toFixed(3), "kg");
+        html += pv("Est. Burn Time", roughBurnTime.toFixed(1), "s");
+        html += pv("Initial Pc", (s0.pc/1e6).toFixed(2), "MPa");
+      }
+      if(mode === "launch"){
+        const vehicle = buildVehicle(motor);
+        const liftoffMass = vehicle.dryMass + vehicle.numEngines*propMass0;
+        const liftoffThrust = vehicle.numEngines*s0.thrust;
+        const twr = liftoffThrust / (liftoffMass*GRAVITY);
+        html += pv("Loaded Mass", liftoffMass.toFixed(2), "kg");
+        html += pv("Liftoff TWR", twr.toFixed(2), "");
+        if(twr <= 1.0) html += '<div class="preview-warn">⚠ TWR ≤ 1 — will not clear the pad</div>';
+      }
+    } else {
+      const mdot0 = massFlow(motor, motor.pcDesign);
+      const thrust0 = thrustN(motor, motor.pcDesign, SEA_LEVEL_PRESSURE);
+      const burnTime = mdot0 > 0 ? motor.propellantLoad/mdot0 : 0;
+      const isp0 = mdot0 > 0 ? thrust0/(mdot0*GRAVITY) : 0;
+      html += pv("Full Thrust", thrust0.toFixed(1), "N");
+      html += pv("Specific Impulse", isp0.toFixed(0), "s");
+      html += pv("Burn Time @100%", burnTime.toFixed(1), "s");
+      html += pv("Chamber Pressure", (motor.pcDesign/1e6).toFixed(2), "MPa");
+      if(mode === "launch"){
+        const vehicle = buildVehicle(motor);
+        const liftoffMass = vehicle.dryMass + vehicle.numEngines*motor.propellantLoad;
+        const twr = (vehicle.numEngines*thrust0) / (liftoffMass*GRAVITY);
+        html += pv("Loaded Mass", liftoffMass.toFixed(2), "kg");
+        html += pv("Liftoff TWR", twr.toFixed(2), "");
+        if(twr <= 1.0) html += '<div class="preview-warn">⚠ TWR ≤ 1 — will not clear the pad</div>';
+      }
+    }
+    box.innerHTML = html;
+  }
+  function pv(label, value, unit){
+    return '<div class="pv"><span class="k">'+label+'</span><b class="mono">'+value+(unit?' '+unit:'')+'</b></div>';
+  }
+
+  /* ============================================================
+     MODE SWITCHING
+  ============================================================ */
+  let mode = "stand";
+  const modeStandBtn = document.getElementById("mode-stand");
+  const modeLaunchBtn = document.getElementById("mode-launch");
+  const vehicleGroup = document.getElementById("vehicle-group");
+  const parachuteGroup = document.getElementById("parachute-group");
+  const fireBtn = document.getElementById("fire-btn");
+  const flameCanvas = document.getElementById("flame-canvas");
+  const throttlePanel = document.getElementById("throttle-panel");
+  const railTrack = document.getElementById("rail-track");
+  const hero1Label = document.getElementById("t-hero1-label");
+  const hero2Label = document.getElementById("t-hero2-label");
+  const previewTitle = document.getElementById("preview-title");
+  const summaryTitle = document.getElementById("summary-title");
+
+  function updateGlyphVisibility(){
+    flameCanvas.hidden = mode !== "stand";
+    railTrack.hidden = mode !== "launch";
+    throttlePanel.hidden = !(mode === "stand" && engineType === "liquid");
+  }
+  function updateSummaryTitle(){
+    summaryTitle.textContent = mode === "launch" ? "Flight Log" : (engineType === "solid" ? "Motor Data Card" : "Hotfire Log");
+  }
+
+  function setMode(next){
+    mode = next;
+    modeStandBtn.classList.toggle("active", mode==="stand");
+    modeLaunchBtn.classList.toggle("active", mode==="launch");
+    vehicleGroup.hidden = mode!=="launch";
+    parachuteGroup.hidden = mode!=="launch";
+    fireBtn.textContent = mode==="stand" ? (engineType==="solid"?"Ignite":"Hotfire") : "Launch";
+    hero1Label.textContent = mode==="stand" ? "Thrust" : "Altitude";
+    hero2Label.textContent = mode==="stand" ? "Chamber P" : "Velocity";
+    previewTitle.textContent = mode==="stand" ? "Pre-Fire Readout" : "Pre-Launch Readout";
+    updateGlyphVisibility();
+    updateSummaryTitle();
+    resetConsole();
+    buildCharts();
+    updatePreview();
+  }
+  modeStandBtn.addEventListener("click", ()=>setMode("stand"));
+  modeLaunchBtn.addEventListener("click", ()=>setMode("launch"));
+
+  /* ============================================================
+     THEME-AWARE COLORS (resolved once, refreshed on theme change)
+  ============================================================ */
+  function resolveTheme(){
+    const cs = getComputedStyle(document.documentElement);
+    const g = name => cs.getPropertyValue(name).trim();
+    return {
+      grid:g("--chart-grid"), baseline:g("--chart-baseline"), muted:g("--ink-muted"),
+      secondary:g("--ink-secondary"), card2:g("--card-2"), tooltipBg:g("--tooltip-bg"), tooltipInk:g("--tooltip-ink"),
+      thrust:g("--series-thrust"), pressure:g("--series-pressure"), mass:g("--series-mass"),
+      altitude:g("--series-altitude"), velocity:g("--series-velocity"),
+    };
+  }
+  let THEME = resolveTheme();
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ()=>{ THEME = resolveTheme(); redrawAll(); });
+  new MutationObserver(()=>{ THEME = resolveTheme(); redrawAll(); }).observe(document.documentElement, {attributes:true, attributeFilter:["data-theme"]});
+  function redrawAll(){ charts.forEach(c=>c.drawUpTo(c._lastIdx||0)); }
+
+  /* ============================================================
+     TRACE CHART (canvas + overlay, hover crosshair via binary search)
+  ============================================================ */
+  function hexToRgba(hex, alpha){
+    const h = hex.replace("#","");
+    const bigint = parseInt(h.length===3 ? h.split("").map(c=>c+c).join("") : h, 16);
+    const r=(bigint>>16)&255, g=(bigint>>8)&255, b=bigint&255;
+    return "rgba("+r+","+g+","+b+","+alpha+")";
+  }
+  function findIdxByTime(points, t){
+    let lo=0, hi=points.length-1;
+    while(lo<hi){ const mid=(lo+hi+1)>>1; if(points[mid].t<=t) lo=mid; else hi=mid-1; }
+    return lo;
+  }
+
+  class TraceChart{
+    constructor(wrap, spec){
+      this.spec = spec;
+      this.canvas = document.createElement("canvas");
+      this.overlay = document.createElement("canvas");
+      this.overlay.style.cursor = "crosshair";
+      wrap.appendChild(this.canvas);
+      wrap.appendChild(this.overlay);
+      this.ctx = this.canvas.getContext("2d");
+      this.octx = this.overlay.getContext("2d");
+      this.points = null; this.domain = null; this._lastIdx = 0;
+      this._resize();
+      new ResizeObserver(()=>this._resize()).observe(wrap);
+      this.overlay.addEventListener("mousemove", e=>this._hover(e));
+      this.overlay.addEventListener("mouseleave", ()=>this.octx.clearRect(0,0,this.overlay.width,this.overlay.height));
+    }
+    _resize(){
+      const rect = this.canvas.parentElement.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      this.w = rect.width; this.h = rect.height; this.dpr = dpr;
+      [this.canvas, this.overlay].forEach(c=>{ c.width = rect.width*dpr; c.height = rect.height*dpr; });
+      if(this.points) this.drawUpTo(this._lastIdx);
+    }
+    setData(points){
+      this.points = points;
+      const values = points.map(this.spec.accessor);
+      let yMin = Math.min(0, ...values), yMax = Math.max(...values);
+      const span = (yMax - yMin) || 1;
+      yMax += span*0.12;
+      if(yMin < 0) yMin -= span*0.12;
+      this.domain = { tMin:0, tMax:points[points.length-1].t || 1, yMin, yMax };
+      this._lastIdx = 0;
+    }
+    clear(){
+      this.points = null; this.domain = null; this._lastIdx = 0;
+      this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
+      this.octx.clearRect(0,0,this.overlay.width,this.overlay.height);
+      if(this._valueEl) this._valueEl.textContent = "—";
+    }
+    _x(t){ const pad=6; return pad + (t-this.domain.tMin)/(this.domain.tMax-this.domain.tMin)*(this.w-2*pad); }
+    _y(v){ const padTop=6, padBot=16; return this.h-padBot - (v-this.domain.yMin)/(this.domain.yMax-this.domain.yMin)*(this.h-padTop-padBot); }
+    drawUpTo(idx){
+      if(!this.points) return;
+      this._lastIdx = idx = Math.max(0, Math.min(idx, this.points.length-1));
+      const ctx = this.ctx;
+      ctx.save(); ctx.setTransform(this.dpr,0,0,this.dpr,0,0); ctx.clearRect(0,0,this.w,this.h);
+      ctx.strokeStyle = THEME.grid; ctx.lineWidth = 1;
+      ctx.fillStyle = THEME.muted; ctx.font = "500 9px 'IBM Plex Mono', monospace";
+      const yTicks = 3;
+      for(let i=0;i<=yTicks;i++){
+        const v = this.domain.yMin + (this.domain.yMax-this.domain.yMin)*i/yTicks;
+        const y = this._y(v);
+        ctx.beginPath(); ctx.moveTo(6,y); ctx.lineTo(this.w-6,y); ctx.stroke();
+        ctx.fillText(this.spec.tick(v), 6, y-2);
+      }
+      if(idx >= 1){
+        const color = THEME[this.spec.colorKey];
+        const stride = Math.max(1, Math.ceil(idx/500));
+        const zeroY = this._y(Math.max(this.domain.yMin, 0));
+        ctx.beginPath();
+        let started = false;
+        for(let i=0;i<=idx;i+=stride){
+          const p = this.points[i]; const x=this._x(p.t), y=this._y(this.spec.accessor(p));
+          if(!started){ ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
+        }
+        const last = this.points[idx];
+        const lx = this._x(last.t), ly = this._y(this.spec.accessor(last));
+        ctx.lineTo(lx,ly);
+        ctx.lineTo(lx, zeroY); ctx.lineTo(this._x(this.points[0].t), zeroY); ctx.closePath();
+        ctx.fillStyle = hexToRgba(color, 0.16); ctx.fill();
+
+        ctx.beginPath(); started = false;
+        for(let i=0;i<=idx;i+=stride){
+          const p = this.points[i]; const x=this._x(p.t), y=this._y(this.spec.accessor(p));
+          if(!started){ ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
+        }
+        ctx.lineTo(lx,ly);
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.stroke();
+        ctx.beginPath(); ctx.arc(lx,ly,3.5,0,Math.PI*2); ctx.fillStyle = color;
+        ctx.fill(); ctx.strokeStyle = THEME.card2; ctx.lineWidth=1.5; ctx.stroke();
+      }
+      ctx.restore();
+      if(this._valueEl && idx >= 0) this._valueEl.textContent = this.spec.fmtLive(this.spec.accessor(this.points[idx]));
+    }
+    _hover(e){
+      if(!this.points || this._lastIdx < 1) return;
+      const rect = this.overlay.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const t = this.domain.tMin + (mx-6)/(this.w-12)*(this.domain.tMax-this.domain.tMin);
+      const idx = Math.max(0, Math.min(findIdxByTime(this.points, t), this._lastIdx));
+      const p = this.points[idx];
+      const octx = this.octx;
+      octx.save(); octx.setTransform(this.dpr,0,0,this.dpr,0,0); octx.clearRect(0,0,this.w,this.h);
+      const x = this._x(p.t), y = this._y(this.spec.accessor(p));
+      const color = THEME[this.spec.colorKey];
+      octx.strokeStyle = THEME.baseline; octx.lineWidth = 1;
+      octx.beginPath(); octx.moveTo(x,4); octx.lineTo(x,this.h-14); octx.stroke();
+      octx.beginPath(); octx.arc(x,y,4,0,Math.PI*2); octx.fillStyle = color; octx.fill();
+      octx.strokeStyle = THEME.card2; octx.lineWidth=1.5; octx.stroke();
+      const text = "t="+p.t.toFixed(2)+"s   "+this.spec.tick(this.spec.accessor(p));
+      octx.font = "600 10.5px 'IBM Plex Mono', monospace";
+      const tw = octx.measureText(text).width + 12;
+      let bx = x + 8; if(bx+tw > this.w-4) bx = x-tw-8;
+      octx.fillStyle = THEME.tooltipBg; octx.fillRect(bx, 3, tw, 16);
+      octx.fillStyle = THEME.tooltipInk; octx.fillText(text, bx+6, 15);
+      octx.restore();
+    }
+  }
+
+  const CHART_SPECS = {
+    stand: [
+      { key:"thrust", label:"Thrust", unit:"N", colorKey:"thrust", accessor:p=>p.thrust, tick:v=>v.toFixed(0), fmtLive:v=>v.toFixed(1)+" N" },
+      { key:"pressure", label:"Chamber Pressure", unit:"MPa", colorKey:"pressure", accessor:p=>p.pc/1e6, tick:v=>v.toFixed(1), fmtLive:v=>v.toFixed(2)+" MPa" },
+      { key:"mass", label:"Propellant Mass", unit:"kg", colorKey:"mass", accessor:p=>p.propMass, tick:v=>v.toFixed(2), fmtLive:v=>v.toFixed(3)+" kg" },
+    ],
+    launch: [
+      { key:"altitude", label:"Altitude", unit:"m", colorKey:"altitude", accessor:p=>p.h, tick:v=>v.toFixed(0), fmtLive:v=>v.toFixed(1)+" m" },
+      { key:"velocity", label:"Velocity", unit:"m/s", colorKey:"velocity", accessor:p=>p.v, tick:v=>v.toFixed(0), fmtLive:v=>v.toFixed(1)+" m/s" },
+      { key:"thrust", label:"Thrust", unit:"N", colorKey:"thrust", accessor:p=>p.thrust, tick:v=>v.toFixed(0), fmtLive:v=>v.toFixed(1)+" N" },
+    ],
+  };
+  let charts = [];
+  const chartsHolder = document.getElementById("charts-holder");
+  function buildCharts(){
+    chartsHolder.innerHTML = "";
+    charts = [];
+    for(const spec of CHART_SPECS[mode]){
+      const block = document.createElement("div");
+      block.className = "chart-block";
+      block.innerHTML =
+        '<div class="chart-head"><span class="c-label">'+spec.label+'</span><span class="c-value mono" style="color:var(--series-'+spec.colorKey+')" id="cval-'+spec.key+'">—</span></div>'+
+        '<div class="chart-wrap"></div>';
+      chartsHolder.appendChild(block);
+      const wrap = block.querySelector(".chart-wrap");
+      const chart = new TraceChart(wrap, spec);
+      chart._valueEl = document.getElementById("cval-"+spec.key);
+      charts.push(chart);
+    }
+  }
+  buildCharts();
+
+  /* ============================================================
+     FLAME GLYPH (test stand — used by both solid and liquid)
+  ============================================================ */
+  const fctx = flameCanvas.getContext("2d");
+  function drawFlame(thrustRatio, animated){
+    const w = flameCanvas.width, h = flameCanvas.height;
+    fctx.clearRect(0,0,w,h);
+    fctx.fillStyle = THEME.secondary;
+    fctx.beginPath();
+    fctx.moveTo(w*0.38, h*0.30); fctx.lineTo(w*0.62, h*0.30);
+    fctx.lineTo(w*0.56, h*0.46); fctx.lineTo(w*0.44, h*0.46);
+    fctx.closePath(); fctx.fill();
+    if(thrustRatio <= 0.01) return;
+    const time = animated ? performance.now()/140 : 0;
+    const baseH = h*0.46 + thrustRatio*h*0.42;
+    const layers = [
+      { widthF:0.16, colorA:"#FFF6D8", colorB:"#FFD27A", lenF:0.55 },
+      { widthF:0.11, colorA:"#FFD27A", colorB:THEME.thrust, lenF:0.80 },
+      { widthF:0.075, colorA:THEME.thrust, colorB:"#7A2600", lenF:1.0 },
+    ];
+    for(const layer of layers){
+      const wobble = animated ? Math.sin(time*1.7+layer.lenF*6)*3*thrustRatio : 0;
+      const flameLen = baseH*layer.lenF + wobble;
+      const grad = fctx.createLinearGradient(0,h*0.46,0,flameLen);
+      grad.addColorStop(0, layer.colorA); grad.addColorStop(1, layer.colorB);
+      fctx.fillStyle = grad;
+      fctx.beginPath();
+      fctx.moveTo(w*0.5 - w*layer.widthF, h*0.46);
+      fctx.quadraticCurveTo(w*0.5 - w*layer.widthF*0.3, (h*0.46+flameLen)/1.4, w*0.5, flameLen);
+      fctx.quadraticCurveTo(w*0.5 + w*layer.widthF*0.3, (h*0.46+flameLen)/1.4, w*0.5 + w*layer.widthF, h*0.46);
+      fctx.closePath(); fctx.fill();
+    }
+  }
+  drawFlame(0,false);
+
+  /* ============================================================
+     ROCKET GLYPH (launch)
+  ============================================================ */
+  const rocketIcon = document.getElementById("rocket-icon");
+  const railTrackEl = document.getElementById("rail-track");
+  function setupTrack(apogeeAlt){
+    railTrackEl.querySelectorAll(".apogee-line,.apogee-label").forEach(n=>n.remove());
+    const line = document.createElement("div"); line.className = "apogee-line"; line.style.bottom = "92%";
+    const label = document.createElement("div"); label.className = "apogee-label"; label.style.bottom = "calc(92% - 6px)";
+    label.textContent = apogeeAlt.toFixed(0)+" m";
+    railTrackEl.appendChild(line); railTrackEl.appendChild(label);
+  }
+  function positionRocket(altitude, trackMax, phase){
+    const pct = Math.max(0, Math.min(altitude/trackMax, 1)) * 92;
+    rocketIcon.style.bottom = pct + "%";
+    rocketIcon.style.transform = phase === "descent" ? "translateY(50%) rotate(180deg)" : "translateY(50%)";
+  }
+
+  /* ============================================================
+     SHARED CONSOLE STATE / CONTROLS
+  ============================================================ */
+  const phaseChip = document.getElementById("phase-chip");
+  const tTime = document.getElementById("t-time");
+  const tHero1 = document.getElementById("t-hero1");
+  const tHero2 = document.getElementById("t-hero2");
+  const resetBtn = document.getElementById("reset-btn");
+  const summaryCard = document.getElementById("summary-card");
+  const summaryDesignation = document.getElementById("summary-designation");
+  const specGrid = document.getElementById("spec-grid");
+  const throttleSlider = document.getElementById("throttle-slider");
+  const throttleValue = document.getElementById("throttle-value");
+  const cutoffBtn = document.getElementById("cutoff-btn");
+
+  let rafId = null;
+  let trackMax = 1;
+  let liquidCutoffRequested = false;
+
+  throttleSlider.addEventListener("input", ()=>{ throttleValue.textContent = throttleSlider.value+"%"; });
+
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(v, hi)); }
+
+  function setPhase(text, cls){
+    phaseChip.textContent = text;
+    phaseChip.className = "phase-chip" + (cls ? " "+cls : "");
+  }
+  function setRunningUI(running){
+    fireBtn.disabled = running;
+    document.querySelectorAll(".rail input").forEach(el=>el.disabled = running);
+  }
+  function resetConsole(){
+    cancelAnimationFrame(rafId);
+    liquidCutoffRequested = false;
+    setPhase("Standby", "");
+    tTime.innerHTML = "0.00<span class=\"unit\">s</span>";
+    tHero1.innerHTML = "0.0<span class=\"unit\">"+(mode==="stand"?"N":"m")+"</span>";
+    tHero2.innerHTML = "0.00<span class=\"unit\">"+(mode==="stand"?"MPa":"m/s")+"</span>";
+    summaryCard.hidden = true;
+    drawFlame(0,false);
+    rocketIcon.style.bottom = "0%";
+    throttleSlider.value = 100; throttleValue.textContent = "100%";
+    cutoffBtn.disabled = true;
+    for(const c of charts) c.clear();
+    setRunningUI(false);
+  }
+
+  function specCell(label, value, unit){
+    return '<div class="spec-cell"><div class="s-label">'+label+'</div><div class="s-value">'+value+(unit?' <span class="unit">'+unit+'</span>':'')+'</div></div>';
+  }
+
+  function renderSummaryStand(summary){
+    summaryDesignation.textContent = summary.designation;
+    specGrid.innerHTML =
+      specCell("Total Impulse", summary.impulse.toFixed(1), "N·s") +
+      specCell("Avg Thrust", summary.avgThrust.toFixed(1), "N") +
+      specCell("Peak Thrust", summary.peakThrust.toFixed(1), "N") +
+      specCell("Peak Chamber P", (summary.peakPc/1e6).toFixed(2), "MPa") +
+      specCell("Burn Time", summary.burnTime.toFixed(2), "s") +
+      specCell("Propellant Mass", summary.propMass0.toFixed(3), "kg") +
+      specCell("Specific Impulse", summary.isp.toFixed(0), "s") +
+      specCell("Peak Klemmung", summary.peakKn.toFixed(0), "");
+    summaryCard.hidden = false;
+  }
+  function renderSummaryLiquidStand(summary){
+    summaryDesignation.textContent = FUEL_PRESETS[currentFuel].formula+" · Isp "+summary.isp.toFixed(0)+"s";
+    specGrid.innerHTML =
+      specCell("Total Impulse", summary.impulse.toFixed(1), "N·s") +
+      specCell("Avg Thrust", summary.avgThrust.toFixed(1), "N") +
+      specCell("Peak Thrust", summary.peakThrust.toFixed(1), "N") +
+      specCell("Peak Chamber P", (summary.peakPc/1e6).toFixed(2), "MPa") +
+      specCell("Burn Time", summary.burnTime.toFixed(2), "s") +
+      specCell("Propellant Used", summary.propUsed.toFixed(3), "kg") +
+      specCell("Specific Impulse", summary.isp.toFixed(0), "s") +
+      specCell("Ended By", summary.endedBy, "");
+    summaryCard.hidden = false;
+  }
+  function renderSummaryLaunch(summary, stillAirborne){
+    summaryDesignation.textContent = summary.twr <= 1 ? "NO LIFTOFF" : summary.twr.toFixed(1)+"× TWR";
+    const twrExtra = summary.twr <= 1 ? '<span class="badge-critical">Will not clear pad</span>' : "";
+    specGrid.innerHTML =
+      specCell("Burnout Alt.", summary.burnout.h.toFixed(0), "m") +
+      specCell("Burnout Vel.", summary.burnout.v.toFixed(1), "m/s") +
+      specCell("Apogee", summary.apogee.h.toFixed(0), "m") +
+      specCell("Time to Apogee", summary.apogee.t.toFixed(1), "s") +
+      specCell("Max Velocity", summary.maxV.toFixed(1), "m/s") +
+      specCell("Max Acceleration", summary.maxAccelG.toFixed(1), "g") +
+      specCell(stillAirborne ? "Alt. @ Time Limit" : "Landing Velocity",
+                stillAirborne ? summary.landing.h.toFixed(0) : Math.abs(summary.landing.v).toFixed(1),
+                stillAirborne ? "m" : "m/s") +
+      specCell("Liftoff TWR", summary.twr.toFixed(2)+(twrExtra?"<br>"+twrExtra:""), "");
+    summaryCard.hidden = false;
+  }
+
+  /* ============================================================
+     SOLID PATH — precompute once, animate a fixed-domain replay
+     (there is no live control: nothing can be commanded mid-burn)
+  ============================================================ */
+  function startPlayback(points, summary, dt){
+    cancelAnimationFrame(rafId);
+    for(const c of charts) c.setData(points);
+    if(mode === "launch") { trackMax = Math.max(summary.apogee.h*1.05, 1); setupTrack(summary.apogee.h); }
+    const totalSimTime = points[points.length-1].t;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setRunningUI(true);
+
+    if(reduced || totalSimTime <= 0){
+      finish(points, summary, totalSimTime);
+      return;
+    }
+
+    const wallDuration = mode==="stand" ? clamp(totalSimTime, 2.5, 8) : clamp(totalSimTime, 6, 14);
+    const speed = totalSimTime / wallDuration;
+    let startTs = null;
+
+    function frame(ts){
+      if(startTs === null) startTs = ts;
+      const simT = Math.min((ts-startTs)/1000*speed, totalSimTime);
+      const idx = Math.min(Math.floor(simT/dt), points.length-1);
+      const p = points[idx];
+      updateLive(p, simT, speed);
+      for(const c of charts) c.drawUpTo(idx);
+      if(mode === "stand") drawFlame(clamp(p.thrust/Math.max(summary.peakThrust,1),0,1), true);
+      else positionRocket(p.h, trackMax, p.phase);
+      if(simT >= totalSimTime){ finish(points, summary, totalSimTime); return; }
+      rafId = requestAnimationFrame(frame);
+    }
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function updateLive(p, simT, speed){
+    tTime.innerHTML = simT.toFixed(2)+'<span class="unit">s ('+speed.toFixed(1)+'×)</span>';
+    if(mode === "stand"){
+      tHero1.innerHTML = p.thrust.toFixed(1)+'<span class="unit">N</span>';
+      tHero2.innerHTML = (p.pc/1e6).toFixed(2)+'<span class="unit">MPa</span>';
+      setPhase(p.pc > 0 ? "Burn" : "Burnout", p.pc > 0 ? "burn" : "coast");
+    } else {
+      tHero1.innerHTML = p.h.toFixed(1)+'<span class="unit">m</span>';
+      tHero2.innerHTML = p.v.toFixed(1)+'<span class="unit">m/s</span>';
+      setPhase(p.phase.charAt(0).toUpperCase()+p.phase.slice(1), p.phase);
+    }
+  }
+
+  function finish(points, summary, totalSimTime){
+    for(const c of charts) c.drawUpTo(points.length-1);
+    updateLive(points[points.length-1], totalSimTime, 1);
+    if(mode === "stand"){
+      setPhase("Complete", "done");
+      drawFlame(0, false);
+      renderSummaryStand(summary);
+    } else {
+      const stillAirborne = summary.landing.h > 5;
+      setPhase(stillAirborne ? "Time Limit" : "Landed", stillAirborne ? "coast" : "done");
+      positionRocket(stillAirborne ? summary.landing.h : 0, trackMax, "descent");
+      renderSummaryLaunch(summary, stillAirborne);
+    }
+    setRunningUI(false);
+  }
+
+  /* ============================================================
+     LIQUID TEST-STAND PATH — real-time, throttle-driven, interactive
+  ============================================================ */
+  function runLiquidTestStandLive(){
+    const motor = buildMotor();
+    const thrust100 = thrustN(motor, motor.pcDesign, SEA_LEVEL_PRESSURE);
+    let propRemaining = motor.propellantLoad;
+    let t = 0, lastTs = null;
+    const points = [];
+
+    liquidCutoffRequested = false;
+    setRunningUI(true);
+    cutoffBtn.disabled = false;
+    setPhase("Burn", "burn");
+
+    function frame(ts){
+      if(lastTs === null) lastTs = ts;
+      const dtReal = Math.min((ts-lastTs)/1000, 0.05);
+      lastTs = ts;
+      const throttle = liquidCutoffRequested ? 0 : parseFloat(throttleSlider.value)/100;
+      const pc = (propRemaining > 1e-6 && throttle > 0) ? motor.pcDesign*throttle : 0;
+      const thrust = pc > 0 ? thrustN(motor, pc, SEA_LEVEL_PRESSURE) : 0;
+      const mdot = pc > 0 ? massFlow(motor, pc) : 0;
+      points.push({ t, pc, thrust, propMass: Math.max(propRemaining,0), mdot });
+      propRemaining -= mdot*dtReal;
+      t += dtReal;
+
+      tTime.innerHTML = t.toFixed(2)+'<span class="unit">s</span>';
+      tHero1.innerHTML = thrust.toFixed(1)+'<span class="unit">N</span>';
+      tHero2.innerHTML = (pc/1e6).toFixed(2)+'<span class="unit">MPa</span>';
+      for(const c of charts){ c.setData(points); c.drawUpTo(points.length-1); }
+      drawFlame(clamp(thrust/Math.max(thrust100,1),0,1), true);
+
+      if(propRemaining <= 1e-6 || (liquidCutoffRequested && thrust <= 0)){
+        finishLiquidStand(points, motor);
+        return;
+      }
+      rafId = requestAnimationFrame(frame);
+    }
+    rafId = requestAnimationFrame(frame);
+  }
+
+  function finishLiquidStand(points, motor){
+    cutoffBtn.disabled = true;
+    setRunningUI(false);
+    setPhase("Complete", "done");
+    drawFlame(0, false);
+    for(const c of charts) c.drawUpTo(points.length-1);
+
+    let impulse = 0;
+    for(let i=0;i<points.length-1;i++) impulse += points[i].thrust * (points[i+1].t - points[i].t);
+    const burnTime = points[points.length-1].t;
+    const avgThrust = burnTime > 0 ? impulse/burnTime : 0;
+    const peakThrust = Math.max(...points.map(p=>p.thrust));
+    const peakPc = Math.max(...points.map(p=>p.pc));
+    const propUsed = motor.propellantLoad - points[points.length-1].propMass;
+    const isp = propUsed > 0 ? impulse/(propUsed*GRAVITY) : 0;
+    const endedBy = liquidCutoffRequested ? "Commanded Cutoff" : "Propellant Depletion";
+    renderSummaryLiquidStand({ impulse, burnTime, avgThrust, peakThrust, peakPc, propUsed, isp, endedBy });
+  }
+
+  cutoffBtn.addEventListener("click", ()=>{
+    liquidCutoffRequested = true;
+    cutoffBtn.disabled = true;
+  });
+
+  /* ============================================================
+     FIRE / RESET
+  ============================================================ */
+  fireBtn.addEventListener("click", ()=>{
+    resetConsole();
+    if(engineType === "solid"){
+      const motor = buildMotor();
+      if(mode === "stand"){
+        const dt = 0.004;
+        const points = runTestStand(motor, dt);
+        const summary = summarizeTestStand(points, dt);
+        startPlayback(points, summary, dt);
+      } else {
+        const vehicle = buildVehicle(motor);
+        const dt = 0.02;
+        const points = simulateFlight(vehicle, dt, 1800);
+        const summary = summarizeFlight(points, vehicle);
+        startPlayback(points, summary, dt);
+      }
+    } else {
+      if(mode === "stand"){
+        runLiquidTestStandLive();
+      } else {
+        const motor = buildMotor();
+        const vehicle = buildVehicle(motor);
+        const dt = 0.02;
+        const points = simulateFlight(vehicle, dt, 1800);
+        const summary = summarizeFlight(points, vehicle);
+        startPlayback(points, summary, dt);
+      }
+    }
+  });
+  resetBtn.addEventListener("click", resetConsole);
+
+  setFuel("solid");
+})();
+</script>

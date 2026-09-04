@@ -1,0 +1,263 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Vertical Slice</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  #hud { position: absolute; top: 8px; left: 8px; color: #cde; font: 12px monospace; background: rgba(0,0,0,0.4); padding: 8px; white-space: pre; }
+</style>
+</head>
+<body>
+<canvas id="cMain"></canvas>
+<div id="hud"></div>
+<script src="js/physics-core.js"></script>
+<script src="js/renderer.js"></script>
+<script src="js/flight-loop.js"></script>
+<script>
+"use strict";
+const planet = RSX.PLANETS.home;
+
+const canvas = document.getElementById("cMain");
+const ctx = canvas.getContext("2d");
+let cssW = window.innerWidth, cssH = window.innerHeight;
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+function resize() {
+  cssW = window.innerWidth; cssH = window.innerHeight;
+  canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+}
+resize();
+window.addEventListener("resize", resize);
+
+const veh = RSX.testVehicle.build();
+veh.thrustNow = (pa, thr) => RSX.testVehicle.thrustNow(veh, pa, thr);
+veh.mdotNow = (pa, thr) => RSX.testVehicle.mdotNow(veh, pa, thr);
+veh.advanceBurn = (A, dtStep) => RSX.testVehicle.advanceBurn(veh, A, dtStep);
+
+const S = { rx: 0, ry: planet.R, vx: -planet.wp * planet.R, vy: 0, th: Math.PI / 2, om: 0, t: 0, mode: "INTEGRATED" };
+const ctrl = { throttle: 0, gimbal: 0, tauRCS: 0, thetaCmd: Math.PI / 2 };
+const cache = { valid: false, tmpA: {}, tmpB: {} };
+const cam = RSX.render.makeCamera();
+const particles = RSX.render.makeParticles(1800);
+const puffSprite = RSX.render.buildPuffSprite(128);
+
+let ignitionT = null, lastFrameT = null;
+let simTime = 0;
+let running = false;
+const starField = RSX.render.buildStarField(1536, 0xC0FFEE);
+
+window.RSXDEBUG = { S, ctrl, veh, cam, planet, particles };
+
+function gimbalControl(dt) {
+  // Crude proportional attitude hold (the real computed-torque cascade is
+  // step 6 of the build order; this is just enough to keep the vertical-
+  // slice test vehicle from tumbling while we evaluate the visuals).
+  const eTh = RSX.wrapPi(ctrl.thetaCmd - S.th);
+  const kp = 1.6;
+  const cmd = RSX.clamp(kp * eTh - 0.9 * S.om, -0.12, 0.12); // rad, ~7deg max
+  const rate = 1.2 * dt;
+  ctrl.gimbal += RSX.clamp(cmd - ctrl.gimbal, -rate, rate);
+}
+
+function spawnPadSmoke(dt) {
+  const alt = Math.hypot(S.rx, S.ry) - planet.R;
+  if (ctrl.throttle <= 0.01 || alt > 200) return;
+  const rate = 90 * (1 - RSX.clamp(alt / 200, 0, 1));
+  const n = rate * dt;
+  const whole = Math.floor(n) + (Math.random() < (n % 1) ? 1 : 0);
+  const nozzleWorldX = S.rx, nozzleWorldY = S.ry - veh.mp.s_cm; // approx, world-ish for a vertical pad rocket
+  for (let i = 0; i < whole; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const vx = side * (18 + Math.random() * 16);
+    const vy = 2 + Math.random() * 7;
+    RSX.render.spawnParticle(particles, side * 4, 0, vx, vy, 3 + Math.random() * 3, 9 + Math.random() * 7, 0, Math.random());
+  }
+}
+
+function stepPhysics(dtWall) {
+  const warp = 1;
+  let remaining = Math.min(dtWall, 0.25) * warp;
+  let guard = 0;
+  while (remaining > 1e-9 && guard++ < 400) {
+    const peek = cache.valid ? cache.d : RSX.deriv(S, veh, ctrl, planet, cache.tmpA);
+    let dt = RSX.chooseDt(S, veh, peek, planet, remaining);
+    gimbalControl(dt);
+    const snap = { rx: S.rx, ry: S.ry, vx: S.vx, vy: S.vy, th: S.th, om: S.om, t: S.t };
+    RSX.stepVerlet(S, veh, ctrl, planet, dt, cache);
+    if (!Number.isFinite(S.rx) || !Number.isFinite(S.ry) || !Number.isFinite(S.vx) ||
+        !Number.isFinite(S.vy) || !Number.isFinite(S.th) || !Number.isFinite(S.om)) {
+      console.error("NaN state detected, restoring snapshot and halting physics", snap);
+      Object.assign(S, snap);
+      cache.valid = false;
+      running = false;
+      return;
+    }
+    remaining -= dt;
+  }
+}
+
+function fmtT(v, d) { return v.toFixed(d == null ? 1 : d); }
+
+function draw(t, dtWall) {
+  const alt = Math.hypot(S.rx, S.ry) - planet.R;
+  const speed = Math.hypot(S.vx, S.vy);
+  // Physics runs in true PCI coords (planet-centered). Rendering uses a
+  // pad-relative local frame (localY ~= altitude) -- valid as a flat-ground
+  // approximation for this single-pad vertical-slice test; a full lateral-
+  // range/orbit renderer will need a proper tangent-frame transform.
+  const localX = S.rx, localY = S.ry - planet.R;
+  const pa = RSX.atmosphere(alt, planet).P;
+  const q = cache.valid ? cache.d.q : 0;
+  const twr = (veh.thrustNow(pa, ctrl.throttle)) / (veh.mp.m * RSX.GRAVITY_REF);
+
+  RSX.render.updateCamera(cam, {
+    x: 0, y: alt, alt, speed, throttle: ctrl.throttle, twr, q, pa,
+    descending: S.vy < 0 && alt > 200,
+  }, dtWall, t);
+
+  // ---- screen-space background: sky ----
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const sky = RSX.render.skyColorsAt(alt);
+  const g = ctx.createLinearGradient(0, 0, 0, cssH);
+  g.addColorStop(0, sky.zenith); g.addColorStop(0.35, sky.upper); g.addColorStop(0.70, sky.mid); g.addColorStop(1, sky.horizon);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, cssW, cssH);
+
+  // stars, fading in with altitude-derived sky luminance
+  const zc = hexToRgbLocal(sky.zenith);
+  const skyLum = 0.2126 * Math.pow(zc[0] / 255, 2.2) + 0.7152 * Math.pow(zc[1] / 255, 2.2) + 0.0722 * Math.pow(zc[2] / 255, 2.2);
+  const starAlpha = RSX.clamp(1 - skyLum / 0.020, 0, 1);
+  if (starAlpha > 0.01) {
+    ctx.globalAlpha = starAlpha;
+    ctx.drawImage(starField, 0, 0, 1536, 1536, 0, 0, cssW, cssH);
+    ctx.globalAlpha = 1;
+  }
+
+  // sun (fixed screen position for this test)
+  const sunX = cssW * 0.78, sunY = cssH * 0.18;
+  const atmFrac = Math.min(pa / 101325, 1);
+  const coreR = 16;
+  ctx.beginPath(); ctx.fillStyle = "#FFFFFF"; ctx.arc(sunX, sunY, coreR, 0, Math.PI * 2); ctx.fill();
+  const cg = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 6 * coreR);
+  cg.addColorStop(0, "rgba(255,240,200,0.5)"); cg.addColorStop(1, "rgba(255,240,200,0)");
+  ctx.globalCompositeOperation = "lighter"; ctx.fillStyle = cg;
+  ctx.beginPath(); ctx.arc(sunX, sunY, 6 * coreR, 0, Math.PI * 2); ctx.fill();
+  if (atmFrac > 0.05) {
+    const ag = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 22 * coreR);
+    ag.addColorStop(0, "rgba(255,240,200,0.12)"); ag.addColorStop(1, "rgba(255,240,200,0)");
+    ctx.fillStyle = ag; ctx.beginPath(); ctx.arc(sunX, sunY, 22 * coreR, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalCompositeOperation = "source-over";
+
+  // ---- world-space ----
+  const ppm = RSX.render.applyCamera(ctx, cam, cssW, cssH, dpr);
+
+  // ground / curvature
+  const geo = RSX.render.groundGeometry(ppm, planet.R, cssW, cssH);
+  ctx.fillStyle = "#3A3E33";
+  if (geo.mode === "flat") {
+    ctx.fillRect(-cssW / ppm, -50000, 2 * cssW / ppm, 50000);
+    // simple pad marking
+    ctx.fillStyle = "#555850"; ctx.fillRect(-15, -2, 30, 2);
+  } else {
+    // (bezier/disc ground modes come later once we actually climb that high in this test)
+    ctx.fillRect(-cssW / ppm, -50000, 2 * cssW / ppm, 50000);
+  }
+
+  // pad smoke (behind rocket)
+  ctx.save();
+  ctx.translate(localX, 0);
+  RSX.render.drawSmokeParticles(ctx, particles, puffSprite, veh.propKey, ppm);
+  ctx.restore();
+
+  // ---- rocket ----
+  const s_cm = veh.mp.s_cm;
+  const noseWorldX = localX + s_cm * Math.cos(S.th);
+  const noseWorldY = localY + s_cm * Math.sin(S.th);
+  ctx.save();
+  ctx.translate(noseWorldX, noseWorldY);
+  ctx.rotate(S.th + Math.PI / 2); // local +y (aft) -> world -bHat
+
+  const tankPart = veh.parts.find(p => p.name === "tank");
+  const burnTime = ignitionT != null ? (t - ignitionT) : 0;
+  const sootLevel = RSX.clamp(0.45 * RSX.clamp((burnTime - 5) / 60, 0, 1), 0, 1) > 0 ? Math.round(RSX.clamp((burnTime - 5) / 60, 0, 1) * 5) / 5 : 0;
+
+  RSX.render.drawNoseCone(ctx, veh.art.noseLen, veh.art.noseDia, "white", ppm);
+  ctx.save(); ctx.translate(0, veh.art.noseLen);
+  RSX.render.drawBodySegment(ctx, veh.art.bodyLen, veh.art.bodyDia, "white", ppm, sootLevel);
+  RSX.render.drawFins(ctx, veh.art.bodyDia, veh.art.finRootChord, veh.art.finSpan, null, veh.art.bodyLen, ppm);
+  ctx.restore();
+
+  const bellRt = veh.motor.nozzle.throatD / 2, bellRe = veh.motor.nozzle.exitD / 2;
+  ctx.save();
+  ctx.translate(0, veh.sTail);
+  const Ln = RSX.render.drawEngineBell(ctx, bellRt, bellRe, ctrl.gimbal, ctrl.throttle, sootLevel);
+  ctx.restore();
+  ctx.restore(); // end vehicle transform
+
+  // plume: drawn in the SAME rotated frame as the engine, at the bell exit
+  ctx.save();
+  ctx.translate(noseWorldX, noseWorldY);
+  ctx.rotate(S.th + Math.PI / 2 + ctrl.gimbal);
+  const pc = veh.motor.pcDesign * ctrl.throttle;
+  RSX.render.drawPlume(ctx, veh.motor, pc, pa, ctrl.throttle, veh.propKey, t, veh.sTail + Ln, ppm);
+  ctx.restore();
+
+  if (ignitionT != null) {
+    const dtIgn = t - ignitionT;
+    RSX.render.drawIgnitionFlash(ctx, cssW, cssH, 0, 0, veh.motor.nozzle.exitD, ppm, dtIgn, dpr);
+  }
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  RSX.render.drawExposure(ctx, cssW, cssH, RSX.render.FUEL_VIS[veh.propKey].baseOpacity, ctrl.throttle, ignitionT != null ? t - ignitionT : null, dpr);
+
+  document.getElementById("hud").textContent =
+    `t=${fmtT(t,2)}  alt=${fmtT(alt,1)}m  v=${fmtT(speed,1)}m/s  throttle=${fmtT(ctrl.throttle*100,0)}%\n` +
+    `pa=${fmtT(pa,0)}Pa  q=${fmtT(q,0)}Pa  TWR=${fmtT(twr,2)}  prop=${fmtT(tankPart.propMass,0)}kg\n` +
+    `[Z] full throttle  [X] cut  [SPACE] ignite`;
+}
+function hexToRgbLocal(hex) {
+  const h = hex.replace("#", "").replace(/^rgb\(|\)$/g, "");
+  if (hex.startsWith("rgb")) return hex.match(/\d+/g).map(Number);
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function frame(ts) {
+  const tSec = ts / 1000;
+  if (lastFrameT == null) lastFrameT = tSec;
+  const dtWall = Math.min(tSec - lastFrameT, 0.05);
+  lastFrameT = tSec;
+  simTime += dtWall;
+
+  stepPhysics(dtWall);
+  spawnPadSmoke(dtWall);
+  RSX.render.updateParticles(particles, dtWall);
+  draw(simTime, dtWall);
+
+  requestAnimationFrame(frame);
+}
+
+window.addEventListener("keydown", e => {
+  if (e.code === "Space") { if (ignitionT == null) ignitionT = simTime; ctrl.throttle = 1; }
+  if (e.code === "KeyZ") ctrl.throttle = 1;
+  if (e.code === "KeyX") ctrl.throttle = 0;
+});
+
+draw(0, 0);
+requestAnimationFrame(frame);
+
+// debug hook for screenshot-based QA independent of rAF:
+window.RSXSetState = function (alt, v, throttle) {
+  S.ry = planet.R + alt; S.rx = 0;
+  S.vy = v; S.vx = -planet.wp * S.ry;
+  S.th = Math.PI / 2; S.om = 0;
+  ctrl.throttle = throttle;
+  if (throttle > 0 && ignitionT == null) ignitionT = simTime - 0.5;
+  cache.valid = false;
+  veh.mp = RSX.massProps(veh.parts);
+  draw(simTime, 0.016);
+};
+</script>
+</body>
+</html>
