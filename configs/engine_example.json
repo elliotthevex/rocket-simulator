@@ -1,0 +1,23 @@
+{
+  "name": "Generic-38mm-3Grain-Composite",
+  "propellant": {
+    "name": "Generic Composite (illustrative)",
+    "density_kg_m3": 1750,
+    "burn_rate_coeff_a": 3.63e-5,
+    "burn_rate_exponent_n": 0.35,
+    "c_star_m_s": 1500,
+    "specific_heat_ratio_k": 1.2
+  },
+  "grain": {
+    "outer_diameter_m": 0.038,
+    "core_diameter_m": 0.012,
+    "segment_length_m": 0.04,
+    "num_segments": 3,
+    "burn_ends": true
+  },
+  "nozzle": {
+    "throat_diameter_m": 0.009,
+    "exit_diameter_m": 0.027,
+    "efficiency": 0.92
+  }
+}

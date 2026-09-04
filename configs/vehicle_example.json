@@ -1,0 +1,12 @@
+{
+  "name": "Example Single-Stage Rocket",
+  "engine_config": "engine_example.json",
+  "num_engines": 1,
+  "dry_mass_kg": 2.5,
+  "diameter_m": 0.041,
+  "drag_coefficient": 0.5,
+  "parachute": {
+    "diameter_m": 0.6,
+    "drag_coefficient": 1.5
+  }
+}
