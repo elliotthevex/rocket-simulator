@@ -21,10 +21,12 @@ const planet = RSX.PLANETS.home;
 
 const canvas = document.getElementById("cMain");
 const ctx = canvas.getContext("2d");
-let cssW = window.innerWidth, cssH = window.innerHeight;
+// A viewport can briefly report 0x0 (pane not yet laid out, etc.) -- fall
+// back to a sane default rather than sizing the canvas to nothing.
+let cssW = window.innerWidth || 960, cssH = window.innerHeight || 600;
 const dpr = Math.min(window.devicePixelRatio || 1, 2);
 function resize() {
-  cssW = window.innerWidth; cssH = window.innerHeight;
+  cssW = window.innerWidth || cssW; cssH = window.innerHeight || cssH;
   canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
 }
 resize();
@@ -45,19 +47,44 @@ const puffSprite = RSX.render.buildPuffSprite(128);
 let ignitionT = null, lastFrameT = null;
 let simTime = 0;
 let running = false;
+let crashed = false, crashMsg = "";
 const starField = RSX.render.buildStarField(1536, 0xC0FFEE);
 
 window.RSXDEBUG = { S, ctrl, veh, cam, planet, particles };
 
-function gimbalControl(dt) {
-  // Crude proportional attitude hold (the real computed-torque cascade is
-  // step 6 of the build order; this is just enough to keep the vertical-
-  // slice test vehicle from tumbling while we evaluate the visuals).
+// Computed-torque attitude controller (design/flight-physics.md §9.1): the
+// plant gain varies by orders of magnitude over a flight as thrust, inertia
+// and the engine moment arm change, so fixed PID gains are sluggish at
+// liftoff and ring at burnout. This divides that gain out, then inverts the
+// gimbal torque relation tau = -l_e*T*sin(delta) to get the deflection, and
+// slew-limits toward it the way a real gimbal actuator would.
+const CTRL_WN = 1.2, CTRL_ZETA = 0.8, GIMBAL_MAX = 0.35, GIMBAL_RATE = 0.9; // rad, rad/s
+function gimbalControl(dt, pa) {
+  const MP = veh.mp;
+  const ell = veh.sEngine - MP.s_cm;
+  const T = ctrl.throttle > 0 ? veh.thrustNow(pa, ctrl.throttle) : 0;
   const eTh = RSX.wrapPi(ctrl.thetaCmd - S.th);
-  const kp = 1.6;
-  const cmd = RSX.clamp(kp * eTh - 0.9 * S.om, -0.12, 0.12); // rad, ~7deg max
-  const rate = 1.2 * dt;
-  ctrl.gimbal += RSX.clamp(cmd - ctrl.gimbal, -rate, rate);
+  let dCmd = 0;
+  if (Math.abs(eTh) >= 0.0035) {
+    const tauDes = MP.I * (CTRL_WN * CTRL_WN * eTh - 2 * CTRL_ZETA * CTRL_WN * S.om);
+    const auth = ell * T;
+    if (auth > 1e-3) {
+      const sinD = RSX.clamp(-tauDes / auth, -1, 1);
+      dCmd = RSX.clamp(Math.asin(sinD), -GIMBAL_MAX, GIMBAL_MAX);
+    }
+  }
+  const dMax = GIMBAL_RATE * dt;
+  ctrl.gimbal += RSX.clamp(dCmd - ctrl.gimbal, -dMax, dMax);
+}
+
+function resetToPad() {
+  S.rx = 0; S.ry = planet.R; S.vx = -planet.wp * planet.R; S.vy = 0;
+  S.th = Math.PI / 2; S.om = 0; S.t = 0;
+  ctrl.throttle = 0; ctrl.gimbal = 0; ctrl.thetaCmd = Math.PI / 2;
+  cache.valid = false; ignitionT = null; crashed = false; crashMsg = "";
+  veh.parts.find(p => p.name === "tank").propMass = 4600;
+  veh.mp = RSX.massProps(veh.parts);
+  particles.n = 0;
 }
 
 function spawnPadSmoke(dt) {
@@ -76,13 +103,36 @@ function spawnPadSmoke(dt) {
 }
 
 function stepPhysics(dtWall) {
+  if (crashed) return;
+  // Resting on the pad: with no ground-contact/support model wired up yet
+  // (that's a later build step -- RSX.contactResponse exists but isn't
+  // called from this test harness), gravity alone pulls the vehicle
+  // through the ground in a fraction of a second before the player ever
+  // presses ignite. Pin it at rest on the pad until there's enough thrust
+  // to actually lift off, instead of silently free-falling through solid
+  // ground with the engine off.
+  const altNow = Math.hypot(S.rx, S.ry) - planet.R;
+  if (altNow <= 0.5 && S.vy <= 0) {
+    const pa0 = RSX.atmosphere(0, planet).P;
+    const thrustNow = ctrl.throttle > 0 ? veh.thrustNow(pa0, ctrl.throttle) : 0;
+    const weight = veh.mp.m * (planet.mu / (planet.R * planet.R));
+    if (thrustNow <= weight) {
+      const rmag = Math.hypot(S.rx, S.ry);
+      const ux = S.rx / rmag, uy = S.ry / rmag;
+      S.rx = ux * planet.R; S.ry = uy * planet.R;
+      S.vx = -planet.wp * S.ry; S.vy = 0; S.om = 0;
+      cache.valid = false;
+      return;
+    }
+  }
   const warp = 1;
   let remaining = Math.min(dtWall, 0.25) * warp;
   let guard = 0;
   while (remaining > 1e-9 && guard++ < 400) {
     const peek = cache.valid ? cache.d : RSX.deriv(S, veh, ctrl, planet, cache.tmpA);
     let dt = RSX.chooseDt(S, veh, peek, planet, remaining);
-    gimbalControl(dt);
+    const alt0 = Math.hypot(S.rx, S.ry) - planet.R;
+    gimbalControl(dt, RSX.atmosphere(Math.max(alt0, 0), planet).P);
     const snap = { rx: S.rx, ry: S.ry, vx: S.vx, vy: S.vy, th: S.th, om: S.om, t: S.t };
     RSX.stepVerlet(S, veh, ctrl, planet, dt, cache);
     if (!Number.isFinite(S.rx) || !Number.isFinite(S.ry) || !Number.isFinite(S.vx) ||
@@ -91,6 +141,31 @@ function stepPhysics(dtWall) {
       Object.assign(S, snap);
       cache.valid = false;
       running = false;
+      return;
+    }
+    // Ground contact: this test harness doesn't yet have the full contact-
+    // point/spring-damper model (that's a later build step) -- for now,
+    // stop the vehicle AT the surface instead of silently tunnelling
+    // through the planet, which is the bug that was just reported.
+    // -0.05 m tolerance, not 0: rx/ry are ~6e5 m position components, so
+    // |r|-R subtracts two nearly-equal large floats and sub-millimetre
+    // rounding noise alone can read as a hair below zero on the very
+    // first substep at liftoff -- without this the rocket "crashes" on
+    // the pad before it ever gets off the ground.
+    const alt1 = Math.hypot(S.rx, S.ry) - planet.R;
+    if (alt1 <= -0.05) {
+      const impactSpeed = Math.hypot(S.vx, S.vy);
+      console.error("GROUND IMPACT", { t: S.t, alt0: alt0, alt1, vx: S.vx, vy: S.vy, impactSpeed, th: S.th, om: S.om, dt });
+      const rmag = Math.hypot(S.rx, S.ry);
+      const ux = S.rx / rmag, uy = S.ry / rmag;
+      S.rx = ux * planet.R; S.ry = uy * planet.R;
+      S.vx = 0; S.vy = 0; S.om = 0;
+      ctrl.throttle = 0; ctrl.gimbal = 0;
+      crashed = true;
+      crashMsg = impactSpeed > 6
+        ? `IMPACT at ${impactSpeed.toFixed(1)} m/s (legs rated ~6 m/s) -- press R to reset`
+        : `Landed at ${impactSpeed.toFixed(1)} m/s -- press R to reset`;
+      cache.valid = false;
       return;
     }
     remaining -= dt;
@@ -214,7 +289,7 @@ function draw(t, dtWall) {
   document.getElementById("hud").textContent =
     `t=${fmtT(t,2)}  alt=${fmtT(alt,1)}m  v=${fmtT(speed,1)}m/s  throttle=${fmtT(ctrl.throttle*100,0)}%\n` +
     `pa=${fmtT(pa,0)}Pa  q=${fmtT(q,0)}Pa  TWR=${fmtT(twr,2)}  prop=${fmtT(tankPart.propMass,0)}kg\n` +
-    `[Z] full throttle  [X] cut  [SPACE] ignite`;
+    (crashed ? crashMsg : `[Z] full throttle  [X] cut  [SPACE] ignite  [R] reset`);
 }
 function hexToRgbLocal(hex) {
   const h = hex.replace("#", "").replace(/^rgb\(|\)$/g, "");
@@ -239,6 +314,8 @@ function frame(ts) {
 }
 
 window.addEventListener("keydown", e => {
+  if (e.code === "KeyR") { resetToPad(); return; }
+  if (crashed) return;
   if (e.code === "Space") { if (ignitionT == null) ignitionT = simTime; ctrl.throttle = 1; }
   if (e.code === "KeyZ") ctrl.throttle = 1;
   if (e.code === "KeyX") ctrl.throttle = 0;
@@ -248,11 +325,21 @@ draw(0, 0);
 requestAnimationFrame(frame);
 
 // debug hook for screenshot-based QA independent of rAF:
+window.RSXTick = function (dtWall, throttle) {
+  if (throttle != null) { ctrl.throttle = throttle; if (throttle > 0 && ignitionT == null) ignitionT = simTime; }
+  simTime += dtWall;
+  stepPhysics(dtWall);
+  spawnPadSmoke(dtWall);
+  RSX.render.updateParticles(particles, dtWall);
+  draw(simTime, dtWall);
+  return { crashed, crashMsg, alt: Math.hypot(S.rx, S.ry) - planet.R, th: S.th, om: S.om };
+};
 window.RSXSetState = function (alt, v, throttle) {
+  crashed = false; crashMsg = "";
   S.ry = planet.R + alt; S.rx = 0;
   S.vy = v; S.vx = -planet.wp * S.ry;
   S.th = Math.PI / 2; S.om = 0;
-  ctrl.throttle = throttle;
+  ctrl.throttle = throttle; ctrl.thetaCmd = Math.PI / 2; ctrl.gimbal = 0;
   if (throttle > 0 && ignitionT == null) ignitionT = simTime - 0.5;
   cache.valid = false;
   veh.mp = RSX.massProps(veh.parts);
