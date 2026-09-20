@@ -1,5 +1,5 @@
 /* =====================================================================
-   CONTROL — attitude control laws (design/flight-physics.md §9.1, §10.4).
+   PHYSICS/CONTROL — attitude control laws (design/flight-physics.md §9.1, §10.4).
    Requires physics-core.js (RSX namespace). Pure functions of the state;
    the only thing mutated is ctrl.gimbal (by stepGimbal).
 
