@@ -1,5 +1,14 @@
 # rocket-sim
 
+> **Browser game (in progress):** open `web/game.html` over a static server
+> (`python3 -m http.server 8765 --directory web`, then http://localhost:8765/game.html).
+> The spec is `design/requirements.md`; the current state of the code is in
+> `design/architecture-analysis.md`; the phased plan is `design/build-plan.md`.
+> Browser physics tests run headlessly on macOS JavaScriptCore with
+> `sh tests/js/run.sh` (no Node needed). `web/index.html` is the original
+> Static Fire Bench (engine test stand).
+
+
 A rocket simulator that prioritizes the **engine**: a solid rocket motor's
 internal combustion and nozzle physics are modeled in detail, and the flight
 dynamics around it are kept intentionally simple.
