@@ -624,8 +624,11 @@ function draw(t, dtWall) {
   const q = cache.valid ? cache.d.q : 0;
   const twr = (veh.thrustNow(pa, ctrl.throttle)) / (veh.mp.m * RSX.GRAVITY_REF);
 
+  // Track the vehicle's pad-local position (the frame everything below is
+  // drawn in), not (0, alt): the vehicle drifts horizontally as soon as it
+  // is off the pad, and a camera pinned to x = 0 loses it within a minute.
   RSX.render.updateCamera(cam, {
-    x: 0, y: alt, alt, speed, throttle: ctrl.throttle, twr, q, pa,
+    x: localX, y: localY, alt, speed, throttle: ctrl.throttle, twr, q, pa,
     descending: S.vy < 0 && alt > 200,
     cssH, vehicleLengthM: veh.sTail + 1.5,
   }, dtWall, t);

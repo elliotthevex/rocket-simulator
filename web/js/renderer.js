@@ -178,8 +178,14 @@ RR.updateCamera = function (cam, target, dt, t) {
   const vehicleLenM = target.vehicleLengthM || 8.6;
   const cssH = target.cssH || 600;
   let targetPpm = (VEHICLE_SCREEN_FRACTION * cssH) / vehicleLenM;
-  cam.x += (target.x - cam.x) * k(6.0);
-  cam.y += (target.y - cam.y) * k(6.0);
+  // Position tracks the target EXACTLY. A first-order lag here trails the
+  // vehicle by v/lambda (~80 m at 500 m/s for lambda = 6/s), which at the
+  // fixed ~25 px/m zoom is thousands of pixels: the rocket left the frame a
+  // few seconds after liftoff. The physics is already smooth, so there is
+  // nothing to filter; only zoom and framing ease (R-21: "smooth but not
+  // delayed").
+  cam.x = target.x;
+  cam.y = target.y;
   cam.logPpm += (Math.log(targetPpm) - cam.logPpm) * k(2.5);
 
   if (h < 3000) cam.targetFramingY = 0.62;
