@@ -52,8 +52,13 @@ RSX.tableLookup = function (tbl, x) {
 };
 
 /* =====================================================================
-   1. PLANETS (BODY) — "home" is the scaled default; "earth" is hard mode.
-   Both share byte-identical physics code; only these constants differ.
+   1. PLANETS (BODY) — "home" is the scaled default; "earth" is hard mode;
+   "mars" is the interplanetary-coast destination (design/critique.md ruled
+   out real patched-conic multi-body flight for this stage, so mars is
+   reached by a simplified time/distance coast, not a real transfer orbit --
+   see web/game.html's arriveAtMars()). All three share byte-identical
+   physics code; only these constants (and, for mars, the atmosphere model
+   below) differ.
    ===================================================================== */
 RSX.PLANETS = {
   home: {
@@ -67,6 +72,25 @@ RSX.PLANETS = {
     R: 6371000, g0: 9.80665, mu: 3.980448e14,
     wp: 7.2921159e-5,       // -> 464.6 m/s eastward at equator
     zAtm: 140000, atmScale: 1.0,
+  },
+  mars: {
+    id: "mars", name: "Mars",
+    // Radius scaled down by the SAME ~9.42% factor "home" applies to real
+    // Earth (600 km vs 6,371 km) -- applied to Mars's real 3,389.5 km
+    // radius, so the two-body "toy solar system" keeps consistent
+    // proportions instead of a jarring scale mismatch. g0 is Mars's REAL
+    // surface gravity (unscaled -- it's what makes landing on Mars feel
+    // different, the whole point of going there).
+    R: 319000, g0: 3.71, mu: 3.7744e11,
+    wp: 2.49e-4,            // rad/s, ~7h day -- same compressed-day convention as home
+    zAtm: 60000,
+    // Real CO2 atmosphere (average surface conditions) -- ~160x thinner
+    // than home's, and cold enough that it needs its own gas constant, so
+    // it can't reuse the Earth-specific US Standard Atmosphere table below.
+    // atmT0 isothermal is a simplification: fine for a landing-only
+    // scenario with no ascent-to-orbit through it in this feature.
+    atmModel: "exponential",
+    P0: 610, scaleH: 11100, atmT0: 210, gasR: 188.9, gasGamma: 1.29,
   },
 };
 
@@ -103,6 +127,20 @@ const UPPER = [
 
 RSX.atmosphere = function (z, planet) {
   const top = planet.zAtm;
+  if (planet.atmModel === "exponential") {
+    if (z >= top) return { rho: 0, P: 0, T: planet.atmT0, a: Math.sqrt(planet.gasGamma * planet.gasR * planet.atmT0) };
+    if (z < 0) z = 0;
+    const T = planet.atmT0;
+    let P = planet.P0 * Math.exp(-z / planet.scaleH);
+    // same smootherstep taper as the Earth-table path below, so P/rho hit
+    // exactly zero with a continuous derivative at the rails boundary
+    const band = 0.10 * top;
+    if (z > top - band) {
+      const s = (top - z) / band, wgt = s * s * (3 - 2 * s);
+      P *= wgt;
+    }
+    return { rho: P / (planet.gasR * T), P, T, a: Math.sqrt(planet.gasGamma * planet.gasR * T) };
+  }
   if (z >= top) return { rho: 0, P: 0, T: 559.6, a: 600 };
   if (z < 0) z = 0;
 

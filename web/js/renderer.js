@@ -70,10 +70,23 @@ function lerpColorLinear(hexA, hexB, t) {
   for (let i = 0; i < 3; i++) out[i] = SRGB(LIN(a[i]) + (LIN(b[i]) - LIN(a[i])) * t);
   return `rgb(${out[0]},${out[1]},${out[2]})`;
 }
-RR.skyColorsAt = function (h) {
+// Mars's thin CO2 atmosphere barely Rayleigh-scatters at all -- its real
+// sky colour comes from suspended dust instead, giving the famous dusty
+// butterscotch/salmon tone photographed by every Mars lander, never Earth's
+// blue. Same keyframe shape as SKY_KEYFRAMES (compressed to mars.zAtm=60km),
+// warm/dusty at the surface fading to black at the edge of its atmosphere.
+RR.MARS_SKY_KEYFRAMES = [
+  [0, "#8A6248", "#B98A5E", "#D9AE84", "#E8C9A0"],
+  [10000, "#5C4438", "#8A6048", "#B08560", "#CBA478"],
+  [25000, "#2E2230", "#4A3438", "#6E5048", "#8E6858"],
+  [40000, "#0F0C18", "#1C1620", "#302430", "#463838"],
+  [60000, "#000000", "#050408", "#0C0A10", "#181418"],
+];
+RR.skyColorsAt = function (h, keyframes) {
+  const KF = keyframes || SKY_KEYFRAMES;
   let i = 0;
-  while (i < SKY_KEYFRAMES.length - 2 && h >= SKY_KEYFRAMES[i + 1][0]) i++;
-  const A = SKY_KEYFRAMES[i], B = SKY_KEYFRAMES[i + 1];
+  while (i < KF.length - 2 && h >= KF[i + 1][0]) i++;
+  const A = KF[i], B = KF[i + 1];
   const t = RSX.clamp((h - A[0]) / (B[0] - A[0]), 0, 1);
   return { zenith: lerpColorLinear(A[1], B[1], t), upper: lerpColorLinear(A[2], B[2], t),
     mid: lerpColorLinear(A[3], B[3], t), horizon: lerpColorLinear(A[4], B[4], t) };
@@ -124,13 +137,18 @@ RR.buildStarField = function (size, seed) {
    Camera. World: metres, +y up, origin at the pad (planet centre is at
    (0,-R)). Screen: px, +y down. (design/visual-realism.md §1.2, §7)
 --------------------------------------------------------------------- */
+// logPpm's initial 28.0 must match PPM_ANCHORS[0] just below, AND game.html's
+// iconPpmSmoothed seed -- keeping all three in sync means the icon-mode zoom
+// clamp (game.html §7.2) starts at iconScale=1 (no boost, no pop) while
+// sitting on the pad, instead of a discontinuity on the very first frame.
 RR.makeCamera = () => ({
-  x: 0, y: 30, logPpm: Math.log(8.0), rot: 0,
+  x: 0, y: 30, logPpm: Math.log(28.0), rot: 0,
   shakeX: 0, shakeY: 0, shakeRot: 0,
   framingY: 0.62, targetFramingY: 0.62,
 });
 
-const PPM_ANCHORS = [[0, 8], [200, 5], [1e3, 2.2], [5e3, 0.55], [2e4, 0.10], [6e4, 0.02], [1.5e5, 0.0035], [4e5, 0.0012], [2e6, 1.8e-4]];
+// [0]'s 28 must match makeCamera()'s initial logPpm above -- see the comment there.
+const PPM_ANCHORS = [[0, 28], [200, 5], [1e3, 2.2], [5e3, 0.55], [2e4, 0.10], [6e4, 0.02], [1.5e5, 0.0035], [4e5, 0.0012], [2e6, 1.8e-4]];
 RR.targetPpmFor = function (h) {
   h = Math.max(h, 0);
   let i = 0;
@@ -143,10 +161,23 @@ RR.targetPpmFor = function (h) {
   return Math.exp(lp0 + (lp1 - lp0) * t);
 };
 
+// Fixed camera zoom, per request: hold a constant ON-SCREEN size for the
+// rocket always, instead of pulling back with altitude/speed (design/
+// visual-realism.md §7.2's own approach). This must be a FRACTION OF
+// SCREEN HEIGHT, not a fixed px/m constant -- a fixed px/m value looks
+// "zoomed out" on a wide desktop window even though it's the exact same
+// absolute size that read fine on a narrow one (reported directly: fine on
+// a narrow pane, invisible on a wide desktop browser at the same ppm).
+// RR.targetPpmFor() is left intact/unused above in case zoom-with-altitude
+// is ever wanted back.
+const VEHICLE_SCREEN_FRACTION = 0.28; // rocket occupies ~28% of screen height
+
 RR.updateCamera = function (cam, target, dt, t) {
   const k = l => 1 - Math.exp(-l * dt);
   const h = target.alt;
-  let targetPpm = RR.targetPpmFor(h) / (1 + 0.00045 * target.speed);
+  const vehicleLenM = target.vehicleLengthM || 8.6;
+  const cssH = target.cssH || 600;
+  let targetPpm = (VEHICLE_SCREEN_FRACTION * cssH) / vehicleLenM;
   cam.x += (target.x - cam.x) * k(6.0);
   cam.y += (target.y - cam.y) * k(6.0);
   cam.logPpm += (Math.log(targetPpm) - cam.logPpm) * k(2.5);
@@ -157,17 +188,10 @@ RR.updateCamera = function (cam, target, dt, t) {
   if (target.descending) cam.targetFramingY = 0.35;
   cam.framingY += (cam.targetFramingY - cam.framingY) * k(1.5);
 
-  // shake -- silent above the sensible atmosphere, and while coasting
-  const pa = target.pa || 0;
-  let amp = 9 * (target.twr || 0) * (target.throttle || 0) * Math.exp(-h / 450) + 5 * ((target.q || 0) / 30000);
-  if (h > 40000) amp *= 0.15;
-  if (pa < 100) amp = 0;
-  cam.shakeX = amp * RR.vnoise(t * 26);
-  cam.shakeY = amp * RR.vnoise(t * 31 + 17);
-  cam.shakeRot = amp * 0.00006 * RR.vnoise(t * 19 + 43);
-  // handheld idle drift so a quiet camera never reads as a diagram
-  cam.shakeX += 2 * RR.vnoise(t * 0.9);
-  cam.shakeY += 2 * RR.vnoise(t * 0.9 + 5);
+  // Shake disabled per request -- camera stays put regardless of thrust/Q.
+  cam.shakeX = 0;
+  cam.shakeY = 0;
+  cam.shakeRot = 0;
 };
 
 RR.applyCamera = function (ctx, cam, cssW, cssH, dpr) {
@@ -491,7 +515,11 @@ RR.updateParticles = function (P, dt) {
     if (P.age[i] >= P.life[i]) continue; // drop (compact below)
     const drag = Math.exp(-0.55 * dt);
     P.vx[i] *= drag; P.vy[i] *= drag;
-    if (P.age[i] > 1.2) P.vy[i] += 3.5 * dt;
+    // sparks (type 1) fall under real gravity per design doc §5.7; smoke
+    // (type 0) instead gets a delayed upward buoyancy once it's had time to
+    // billow -- the two types never share a fall/rise behavior.
+    if (P.type[i] === 1) P.vy[i] -= 9.8 * dt;
+    else if (P.age[i] > 1.2) P.vy[i] += 3.5 * dt;
     P.x[i] += P.vx[i] * dt; P.y[i] += P.vy[i] * dt;
     P.r[i] = P.r0[i] * (1 + 7 * Math.min(P.age[i], 2.5) * Math.exp(-P.age[i] / 2.5) / P.r0[i] * 0.15);
     P.rot[i] += P.rotv[i] * dt;
@@ -512,7 +540,26 @@ RR.buildPuffSprite = function (size) {
   ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
   return c;
 };
+const _tintedPuffCache = {};
+function tintedPuffSprite(colorHex, size) {
+  size = size || 128;
+  const key = colorHex + ":" + size;
+  if (_tintedPuffCache[key]) return _tintedPuffCache[key];
+  const c = document.createElement("canvas"); c.width = size; c.height = size;
+  const tctx = c.getContext("2d");
+  const [r, g, b] = hexToRgb(colorHex);
+  const grad = tctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, `rgba(${r},${g},${b},0.9)`); grad.addColorStop(0.6, `rgba(${r},${g},${b},0.4)`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  tctx.fillStyle = grad; tctx.fillRect(0, 0, size, size);
+  return _tintedPuffCache[key] = c;
+}
 RR.drawSmokeParticles = function (ctx, P, puffSprite, tintCol, ppm) {
+  // Exhaust smoke now actually uses its propellant's real colour (FUEL_VIS's
+  // smokeCol, defined from the start but never wired up here) -- sooty
+  // beige-grey for kerosene, near-white for methane, pure white steam for
+  // hydrogen -- instead of always drawing the same plain white puff.
+  const fuel = tintCol && RR.FUEL_VIS[tintCol];
+  const sprite = fuel ? tintedPuffSprite(fuel.smokeCol[0]) : puffSprite;
   for (let i = 0; i < P.n; i++) {
     if (P.type[i] !== 0) continue;
     const lifeF = 1 - P.age[i] / P.life[i];
@@ -522,18 +569,196 @@ RR.drawSmokeParticles = function (ctx, P, puffSprite, tintCol, ppm) {
     ctx.save();
     ctx.translate(P.x[i], P.y[i]); ctx.rotate(P.rot[i]);
     ctx.globalAlpha = alpha;
-    const drawLobe = (dx, dy, rad) => {
-      ctx.drawImage(puffSprite, dx / ppm ? dx - rad : dx - rad, dy - rad, rad * 2, rad * 2);
-    };
     const sizePx = R;
-    ctx.drawImage(puffSprite, -sizePx, -sizePx, sizePx * 2, sizePx * 2);
+    ctx.drawImage(sprite, -sizePx, -sizePx, sizePx * 2, sizePx * 2);
     const subR = sizePx * 0.62;
     for (let k = 0; k < 3; k++) {
       const ang = P.seed[i] * 6.283 + k * 2.094;
       const dx = Math.cos(ang) * sizePx * 0.45, dy = Math.sin(ang) * sizePx * 0.45;
-      ctx.drawImage(puffSprite, dx - subR, dy - subR, subR * 2, subR * 2);
+      ctx.drawImage(sprite, dx - subR, dy - subR, subR * 2, subR * 2);
     }
     ctx.restore();
+  }
+};
+
+/* ---------------------------------------------------------------------
+   Warm ground glow -- real launch-photography exhaust clouds read as
+   sunlit/flame-lit from below, not flat white. Floodlights (design doc
+   §6.8) were cut for this vertical slice, but the plume itself is a much
+   bigger always-on light source right at the pad -- this is a cheap
+   stand-in that gets most of that look for two gradient stops. Drawn
+   BEHIND the smoke puffs so they read as lit from within/below.
+--------------------------------------------------------------------- */
+RR.drawGroundGlow = function (ctx, throttle, alt) {
+  if (throttle <= 0.01 || alt > 300) return;
+  const fade = RSX.clamp(1 - alt / 300, 0, 1) * RSX.clamp(throttle, 0, 1);
+  if (fade <= 0.01) return;
+  const R = 16;
+  const g = ctx.createRadialGradient(0, 1, 0, 0, 1, R);
+  g.addColorStop(0.00, `rgba(255,175,90,${0.40 * fade})`);
+  g.addColorStop(0.35, `rgba(255,140,60,${0.22 * fade})`);
+  g.addColorStop(1.00, "rgba(255,120,50,0)");
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 1, R, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+};
+
+/* ---------------------------------------------------------------------
+   Spark particles (type 1, design/visual-realism.md §5.7) -- the type this
+   struct-of-arrays reserved from the start but never had a drawer for.
+   Drawn as short bright streaks along each particle's own velocity vector,
+   additive so overlapping sparks blow out to white the way real ones do.
+--------------------------------------------------------------------- */
+RR.drawSparkParticles = function (ctx, P, ppm) {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let i = 0; i < P.n; i++) {
+    if (P.type[i] !== 1) continue;
+    const lifeF = 1 - P.age[i] / P.life[i];
+    const alpha = Math.max(lifeF, 0);
+    if (alpha <= 0.01) continue;
+    const speed = Math.hypot(P.vx[i], P.vy[i]);
+    const len = Math.min(0.4, 0.02 * speed); // short streak, world metres -- scales with how fast it's moving
+    const ux = speed > 1e-6 ? P.vx[i] / speed : 0, uy = speed > 1e-6 ? P.vy[i] / speed : 0;
+    ctx.strokeStyle = `rgba(255,${230 + 20 * lifeF | 0},${140 + 80 * lifeF | 0},${alpha})`;
+    ctx.lineWidth = Math.max(0.3 / ppm, 0.015);
+    ctx.beginPath();
+    ctx.moveTo(P.x[i], P.y[i]);
+    ctx.lineTo(P.x[i] - ux * len, P.y[i] - uy * len);
+    ctx.stroke();
+  }
+  ctx.restore();
+};
+
+/* ---------------------------------------------------------------------
+   Launch tower -- static gantry next to the pad (design/visual-realism.md
+   §6.8, trimmed for this vertical slice: no flame trench, no floodlights).
+   Drawn in the SAME pad-local frame as the ground/pad marking -- ctx is
+   already at true world scale via RR.applyCamera, so this only needs its
+   own fixed pad-relative offset, never the vehicle's rotating/translating
+   transform. vehAttach: {x,y} world/pad-local point for the umbilical's
+   vehicle-side end, or null/undefined to skip the umbilical entirely (it
+   "whips away" at T-0 by simply not being drawn any more).
+--------------------------------------------------------------------- */
+const TOWER_X = 6.5, TOWER_H = 13.0, TOWER_RAIL_GAP = 2.0, TOWER_DEPTH = 0.45;
+// vehAttach: null (nothing drawn, arms retracted) or {lower:{x,y}, upper:{x,y}}
+// -- two pad-local world points on the vehicle's CURRENT body, for a lower
+// service arm (~tank height, doubles as the umbilical's root) and an upper
+// capture-style arm (~probe height), matching a real orbital launch mount's
+// twin quick-disconnect/capture arms rather than one bare cable.
+RR.drawLaunchTower = function (ctx, ppm, t, vehAttach) {
+  const railX = TOWER_RAIL_GAP / 2;
+  ctx.save();
+  ctx.translate(TOWER_X, 0);
+
+  // "Back" rails + depth struts, drawn first/darker/thinner: a cheap 2D
+  // trick so this reads as a box truss instead of a flat ladder -- a real
+  // lattice tower is 4-legged, not 2, and full 3D isn't worth it here.
+  const backX = TOWER_DEPTH * 0.55;
+  ctx.strokeStyle = "#33383D";
+  for (const sign of [-1, 1]) {
+    ctx.lineWidth = Math.max(0.5 / ppm, 0.20);
+    ctx.beginPath(); ctx.moveTo(sign * railX + backX, 0); ctx.lineTo(sign * railX + backX, TOWER_H); ctx.stroke();
+  }
+  ctx.lineWidth = Math.max(0.25 / ppm, 0.09);
+  for (const f of [0.12, 0.36, 0.60, 0.84]) {
+    const y = TOWER_H * f;
+    ctx.beginPath(); ctx.moveTo(-railX, y); ctx.lineTo(-railX + backX, y - 0.3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(railX, y); ctx.lineTo(railX + backX, y - 0.3); ctx.stroke();
+  }
+
+  // Splayed base legs -- a real tower's foundation is wider than its shaft.
+  ctx.strokeStyle = "#3D4247"; ctx.lineWidth = Math.max(0.6 / ppm, 0.22);
+  for (const sign of [-1, 1]) {
+    ctx.beginPath(); ctx.moveTo(sign * railX, 0); ctx.lineTo(sign * (railX + 1.1), -1.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sign * railX, 1.4); ctx.lineTo(sign * (railX + 1.1), -1.6); ctx.stroke();
+  }
+
+  // 2 front vertical rails, each with a thinner lit-edge highlight on the +x face
+  for (const sign of [-1, 1]) {
+    ctx.strokeStyle = "#4A5058"; ctx.lineWidth = Math.max(0.7 / ppm, 0.28);
+    ctx.beginPath(); ctx.moveTo(sign * railX, 0); ctx.lineTo(sign * railX, TOWER_H); ctx.stroke();
+    ctx.strokeStyle = "#9AA4AE"; ctx.lineWidth = Math.max(0.2 / ppm, 0.08);
+    ctx.beginPath(); ctx.moveTo(sign * railX + 0.06, 0); ctx.lineTo(sign * railX + 0.06, TOWER_H); ctx.stroke();
+  }
+
+  // ~12 evenly-spaced X-braces between the front rails
+  const nBrace = 12;
+  ctx.strokeStyle = "#4A5058"; ctx.lineWidth = Math.max(0.3 / ppm, 0.12);
+  for (let i = 0; i < nBrace; i++) {
+    const y0 = TOWER_H * i / nBrace, y1 = TOWER_H * (i + 1) / nBrace;
+    ctx.beginPath(); ctx.moveTo(-railX, y0); ctx.lineTo(railX, y1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(railX, y0); ctx.lineTo(-railX, y1); ctx.stroke();
+  }
+
+  // 5 platform decks, each with a thin railing line
+  ctx.fillStyle = "#5B6167";
+  for (const f of [0.20, 0.42, 0.64, 0.86, 0.97]) {
+    const y = TOWER_H * f;
+    ctx.fillRect(-railX - 0.3, y - 0.08, TOWER_RAIL_GAP + 0.6, 0.16);
+    ctx.strokeStyle = "#787E84"; ctx.lineWidth = Math.max(0.15 / ppm, 0.03);
+    ctx.beginPath(); ctx.moveTo(-railX - 0.3, y - 0.35); ctx.lineTo(railX + 0.3, y - 0.35); ctx.stroke();
+  }
+
+  // Mast + red aviation light blinking at 1 Hz -- costs nothing, reads as
+  // "real facility" instantly (design doc §6.8's own words for this detail)
+  const mastTopY = TOWER_H + 1.6;
+  ctx.strokeStyle = "#8B8F94"; ctx.lineWidth = Math.max(0.2 / ppm, 0.04);
+  ctx.beginPath(); ctx.moveTo(0, TOWER_H); ctx.lineTo(0, mastTopY); ctx.stroke();
+
+  if (Math.sin(t * 2 * Math.PI * 1.0) > 0) {
+    ctx.globalCompositeOperation = "lighter";
+    const g = ctx.createRadialGradient(0, mastTopY, 0, 0, mastTopY, 1.3);
+    g.addColorStop(0, "rgba(255,59,48,0.9)"); g.addColorStop(1, "rgba(255,59,48,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, mastTopY, 1.3, 0, Math.PI * 2); ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "#FF3B30";
+    ctx.beginPath(); ctx.arc(0, mastTopY, Math.max(0.4 / ppm, 0.07), 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore(); // end tower-local frame
+
+  // Service arms + umbilical -- OUTER pad-local frame (span to the vehicle's
+  // own current position), only while it hasn't lit yet: they retract at
+  // T-0 exactly like a real quick-disconnect/capture arm would, by simply
+  // not being drawn any more (an animated swing-away is a nice-to-have).
+  if (vehAttach) {
+    const drawArm = (towerY, tip, thick) => {
+      const towerPt = { x: TOWER_X - railX, y: towerY };
+      const dx = tip.x - towerPt.x, dy = tip.y - towerPt.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-3) return;
+      const ux = dx / len, uy = dy / len, px = -uy, py = ux, half = thick / 2;
+      ctx.strokeStyle = "#565C62"; ctx.lineWidth = Math.max(0.25 / ppm, 0.09);
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(towerPt.x + px * half * s, towerPt.y + py * half * s);
+        ctx.lineTo(tip.x + px * half * s, tip.y + py * half * s);
+        ctx.stroke();
+      }
+      const nStrut = Math.max(2, Math.round(len / 0.6));
+      for (let i = 1; i < nStrut; i++) {
+        const f = i / nStrut, cx = towerPt.x + dx * f, cy = towerPt.y + dy * f;
+        ctx.beginPath();
+        ctx.moveTo(cx + px * half, cy + py * half); ctx.lineTo(cx - px * half, cy - py * half);
+        ctx.stroke();
+      }
+    };
+    if (vehAttach.upper) drawArm(TOWER_H * 0.86, vehAttach.upper, 0.35);
+    if (vehAttach.lower) drawArm(TOWER_H * 0.42, vehAttach.lower, 0.45);
+
+    // Umbilical cable sags from the lower arm's own tower-side root.
+    if (vehAttach.lower) {
+      const towerSideX = TOWER_X - railX, towerSideY = TOWER_H * 0.42;
+      const midX = (towerSideX + vehAttach.lower.x) / 2, midY = (towerSideY + vehAttach.lower.y) / 2 - 0.8;
+      ctx.strokeStyle = "#3A4046"; ctx.lineWidth = Math.max(0.2 / ppm, 0.06);
+      ctx.beginPath();
+      ctx.moveTo(towerSideX, towerSideY);
+      ctx.quadraticCurveTo(midX, midY, vehAttach.lower.x, vehAttach.lower.y);
+      ctx.stroke();
+    }
   }
 };
 

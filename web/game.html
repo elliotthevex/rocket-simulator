@@ -3,21 +3,229 @@
 <head>
 <meta charset="utf-8">
 <title>Vertical Slice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
   canvas { display: block; position: absolute; top: 0; left: 0; }
   #hud { position: absolute; top: 8px; left: 8px; color: #cde; font: 12px monospace; background: rgba(0,0,0,0.4); padding: 8px; white-space: pre; }
+
+  /* ---- design/ux-layout.md sec 5.2 tokens (trimmed to what the part-inspect panel needs) ---- */
+  :root {
+    --card:#F8F7F3; --card-2:#FBFAF7; --ink-primary:#1A1815; --ink-secondary:#5B564C;
+    --ink-muted:#8B8579; --border:rgba(26,24,21,0.12); --border-strong:rgba(26,24,21,0.22);
+    --accent:#D9601F; --accent-ink:#241000; --accent-soft:rgba(217,96,31,0.14);
+    --stat-nominal:#0F7A6C; --stat-caution:#A85E00; --stat-critical:#BE2F27; --stat-info:#1D5FBF;
+    --prop-solid:#8A7C68; --prop-rp1:#D9601F; --prop-ch4:#2A6FB0; --prop-lh2:#6E8796;
+    --hud-panel:rgba(248,247,243,0.93); --hud-stroke:rgba(26,24,21,0.28); --hud-shadow:0 2px 10px rgba(26,24,21,0.22);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --card:#1D2225; --card-2:#20262A; --ink-primary:#F2EFE9;
+      --ink-secondary:#B7B2A6; --ink-muted:#726E64; --border:rgba(242,239,233,0.12);
+      --border-strong:rgba(242,239,233,0.24); --accent:#E67337; --accent-ink:#1B0C00;
+      --accent-soft:rgba(230,115,55,0.16); --stat-nominal:#35BFAC; --stat-caution:#E9A33A;
+      --stat-critical:#FF6B5E; --stat-info:#6BA8F5; --prop-solid:#B3A692; --prop-rp1:#E67337;
+      --prop-ch4:#5B9EE0; --prop-lh2:#C3D2DB; --hud-panel:rgba(29,34,37,0.93);
+      --hud-stroke:rgba(242,239,233,0.30); --hud-shadow:0 2px 10px rgba(0,0,0,0.45);
+    }
+  }
+
+  /* ---- part-inspect panel (design/education.md's Flight Notes card, reused: 320px,
+     --card bg, 3px --accent left border, 180ms fade-in, Esc/close/click-away dismiss,
+     never modal, never pauses the sim) ---- */
+  #partPanel {
+    position: fixed; z-index: 50;
+    background: var(--card); color: var(--ink-primary);
+    border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 3px;
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    box-shadow: var(--hud-shadow);
+    animation: partPanelIn 180ms ease-out;
+  }
+  @keyframes partPanelIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  #partPanel:not([data-part="engine"]) {
+    width: 320px; max-width: calc(100vw - 24px);
+    padding: 14px 16px 16px;
+  }
+
+  #partPanel[data-part="engine"] {
+    left: auto; top: 0; right: 0; bottom: 0;
+    width: min(720px, 94vw); max-width: 94vw;
+    padding: 16px 18px 90px;
+    overflow-y: auto;
+    border-left: 1px solid var(--border); border-top: 3px solid var(--accent);
+    border-radius: 0;
+  }
+  @media (max-width: 900px) {
+    #partPanel[data-part="engine"] {
+      left: 0; right: 0; top: auto; bottom: 0;
+      width: 100%; max-width: 100%; height: min(82vh, 680px);
+      border-top: 3px solid var(--accent); border-left: none;
+    }
+  }
+
+  .panel-close {
+    position: absolute; top: 8px; right: 8px; width: 24px; height: 24px;
+    line-height: 21px; text-align: center; padding: 0;
+    border: 1px solid var(--border-strong); border-radius: 3px;
+    background: var(--card-2); color: var(--ink-secondary);
+    font: 15px/1 sans-serif; cursor: pointer;
+  }
+  .panel-close:hover { color: var(--ink-primary); border-color: var(--accent); }
+
+  .panel-title {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 15px;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-primary);
+    margin: 0 26px 6px 0;
+  }
+  .panel-body { font-size: 13px; line-height: 1.5; color: var(--ink-secondary); margin: 0 0 10px; }
+
+  #enginePreview, #engineList, #engineApplyBtn { display: none; }
+  #partPanel[data-part="engine"] #enginePreview {
+    display: block; margin: 10px 0 14px; padding: 10px 12px;
+    background: var(--card-2); border: 1px solid var(--border); border-radius: 3px;
+  }
+  .outcome-row { display: flex; align-items: baseline; gap: 8px; padding: 3px 0; }
+  .outcome-label {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 11px;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted);
+    flex: 0 0 128px;
+  }
+  .outcome-values { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--ink-primary); flex: 1 1 auto; }
+  .outcome-delta { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 500; flex: 0 0 auto; min-width: 52px; text-align: right; }
+  .outcome-delta.nominal { color: var(--stat-nominal); }
+  .outcome-delta.critical { color: var(--stat-critical); font-weight: 700; }
+  .outcome-delta.info { color: var(--ink-secondary); }
+  .outcome-sep-tag {
+    display: inline-block; margin-left: 8px; padding: 1px 5px; border-radius: 2px;
+    background: var(--accent-soft); color: var(--stat-caution);
+    font-family: 'Barlow Condensed', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  }
+
+  #partPanel[data-part="engine"] #engineList {
+    display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px;
+  }
+  .engine-card {
+    flex: 1 1 155px; min-width: 155px;
+    background: var(--card-2); border: 1px solid var(--border); border-radius: 4px;
+    padding: 10px 10px 12px; position: relative;
+  }
+  .engine-card.is-current { outline: 1.5px solid var(--accent); outline-offset: -1.5px; }
+  .engine-card.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+  .engine-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+  .engine-name {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 14px;
+    letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-primary);
+  }
+  .engine-id { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-muted); }
+  .engine-fuel-chip {
+    display: inline-flex; align-items: center; gap: 5px; margin: 5px 0 6px;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 11px; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--ink-secondary);
+  }
+  .engine-fuel-chip::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--dot-color, var(--ink-muted)); display: inline-block; }
+  .engine-tagline { font-size: 11.5px; line-height: 1.4; color: var(--ink-secondary); margin: 0 0 8px; }
+  .engine-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin-bottom: 8px; }
+  .engine-stat-label { font-family: 'Barlow Condensed', sans-serif; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-muted); }
+  .engine-stat-val { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--ink-primary); }
+  .engine-pros, .engine-cons { margin: 0 0 6px; padding-left: 14px; font-size: 11px; line-height: 1.45; }
+  .engine-pros li { color: var(--stat-nominal); }
+  .engine-cons li { color: var(--stat-critical); }
+  .engine-select-btn {
+    width: 100%; margin-top: 4px; padding: 6px 8px; cursor: pointer;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    border: 1px solid var(--border-strong); border-radius: 3px; background: var(--card); color: var(--ink-primary);
+  }
+  .engine-card.is-selected .engine-select-btn { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  #partPanel[data-part="engine"] #engineApplyBtn {
+    display: block; width: calc(100% - 36px); position: absolute; left: 18px; right: 18px; bottom: 18px;
+    padding: 10px; cursor: pointer;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 13px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    background: var(--accent); color: #fff; border: none; border-radius: 4px;
+  }
+  #partPanel[data-part="engine"] #engineApplyBtn:disabled { opacity: 0.5; cursor: default; }
+  @media (max-width: 900px) {
+    #partPanel[data-part="engine"] #engineApplyBtn { position: sticky; left: 0; right: 0; width: 100%; }
+  }
+
+  /* ---- persistent propellant-comparison panel (always visible, not the
+     click-triggered part-inspect panel above) ---- */
+  #propPanel {
+    position: fixed; z-index: 40; top: 12px; right: 12px; width: 272px;
+    max-height: calc(100vh - 24px); overflow-y: auto;
+    background: var(--card); color: var(--ink-primary);
+    border: 1px solid var(--border); border-right: 3px solid var(--accent);
+    border-radius: 3px; box-shadow: var(--hud-shadow);
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    padding: 12px 14px 14px;
+  }
+  @media (max-width: 700px) { #propPanel { display: none; } }
+  #propPanel .panel-title { margin: 0 0 3px; }
+  #propPanel .panel-subtitle {
+    font-size: 10.5px; line-height: 1.4; color: var(--ink-muted); margin: 0 0 12px;
+  }
+  .prop-chart-label {
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 10.5px;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-secondary);
+    margin: 10px 0 6px;
+  }
+  .prop-row { margin-bottom: 7px; }
+  .prop-row-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin-bottom: 2px; }
+  .prop-row-label {
+    display: flex; align-items: center; gap: 5px;
+    font-family: 'Barlow Condensed', sans-serif; font-weight: 600; font-size: 11.5px;
+    letter-spacing: 0.02em; color: var(--ink-primary);
+  }
+  .prop-row-label::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--dot-color, var(--ink-muted)); flex: none; }
+  .prop-row-val { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-secondary); }
+  .prop-bar-track { height: 7px; border-radius: 4px; background: var(--card-2); border: 1px solid var(--border); overflow: hidden; }
+  .prop-bar-fill { height: 100%; border-radius: 3px; background: var(--dot-color, var(--ink-muted)); opacity: 0.85; }
+  .prop-row.is-live .prop-bar-track { border-color: var(--accent); }
+  .prop-row.is-live .prop-row-label { color: var(--accent); }
+  .prop-row.is-live .prop-row-label::after {
+    content: 'FLYING THIS'; margin-left: 5px; font-family: 'Barlow Condensed', sans-serif;
+    font-size: 8.5px; font-weight: 700; letter-spacing: 0.05em; color: #fff;
+    background: var(--accent); padding: 1px 4px; border-radius: 2px;
+  }
+  .prop-note { font-size: 10px; line-height: 1.4; color: var(--ink-muted); margin: 2px 0 0; }
 </style>
 </head>
 <body>
 <canvas id="cMain"></canvas>
 <div id="hud"></div>
+<div id="partPanel" hidden>
+  <button class="panel-close" type="button" aria-label="Close">&times;</button>
+  <div class="panel-title"></div>
+  <div class="panel-body"></div>
+  <div id="enginePreview"></div>
+  <div id="engineList"></div>
+  <button id="engineApplyBtn" type="button">Apply selected engine</button>
+</div>
+<div id="propPanel">
+  <div class="panel-title">Methalox vs. Alternatives</div>
+  <div class="panel-subtitle">Why hydrogen, kerosene, hypergolics &amp; solids persist, and how methane actually compares.</div>
+  <div class="prop-chart-label">Vacuum Specific Impulse (s)</div>
+  <div id="ispChart"></div>
+  <div class="prop-chart-label">Bulk Propellant Density (kg/m³)</div>
+  <div id="densChart"></div>
+</div>
 <script src="js/physics-core.js"></script>
 <script src="js/renderer.js"></script>
 <script src="js/flight-loop.js"></script>
 <script>
 "use strict";
-const planet = RSX.PLANETS.home;
+// let, not const: arriveAtMars() below reassigns this once the interplanetary
+// coast completes. Every function reads planet.* through this one binding
+// (never a value captured at some earlier time), so the reassignment
+// propagates everywhere automatically -- physics, atmosphere, camera, the
+// launch tower's LOD gate, all of it.
+let planet = RSX.PLANETS.home;
 
 const canvas = document.getElementById("cMain");
 const ctx = canvas.getContext("2d");
@@ -28,6 +236,7 @@ const dpr = Math.min(window.devicePixelRatio || 1, 2);
 function resize() {
   cssW = window.innerWidth || cssW; cssH = window.innerHeight || cssH;
   canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssH * dpr);
+  canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
 }
 resize();
 window.addEventListener("resize", resize);
@@ -41,7 +250,7 @@ const S = { rx: 0, ry: planet.R, vx: -planet.wp * planet.R, vy: 0, th: Math.PI /
 const ctrl = { throttle: 0, gimbal: 0, tauRCS: 0, thetaCmd: Math.PI / 2 };
 const cache = { valid: false, tmpA: {}, tmpB: {} };
 const cam = RSX.render.makeCamera();
-const particles = RSX.render.makeParticles(1800);
+const particles = RSX.render.makeParticles(3200);
 const puffSprite = RSX.render.buildPuffSprite(128);
 
 let ignitionT = null, lastFrameT = null;
@@ -50,7 +259,54 @@ let running = false;
 let crashed = false, crashMsg = "";
 const starField = RSX.render.buildStarField(1536, 0xC0FFEE);
 
-window.RSXDEBUG = { S, ctrl, veh, cam, planet, particles };
+// Ignition sequence timing (design/visual-realism.md §4, timeline relative
+// to the ignition COMMAND -- i.e. the first Space/Z press while unlit): a
+// real countdown + throttle ramp instead of an instant step, so liftoff
+// timing falls out of the EXISTING pad-pin thrust>weight check in
+// stepPhysics() for free -- a higher-TWR engine just lifts off earlier in
+// the ramp, no separate liftoff-scripting needed.
+const COUNTDOWN_S = 6.0, SPARK_T = 3.0, THROTTLE_RAMP_S = 1.8;
+let countdownStart = null;   // simTime the countdown was commanded (T-6 reference); null when idle
+let commandedThrottle = 0;   // pilot's Space/Z/X request; ctrl.throttle is the ramped value physics actually sees
+let rampComplete = false;    // true once the 1.8s throttle ramp has ever finished naturally (rampFrac>=1) -- gates instant-resume vs a fresh eased ramp after a post-T-0 abort (KeyX) + retry
+
+// Interplanetary coast to Mars (design/critique.md explicitly ruled out real
+// patched-conic multi-body flight for this stage -- "THE MOON, other
+// bodies, SOI transitions, patched conics... This deletes an entire second
+// physics regime" -- so Mars is reached by a simplified time/distance coast
+// instead of a real transfer orbit: once truly escaping home (positive
+// specific orbital energy, clear of the atmosphere), the player can commit;
+// the coast then counts down a fixed real distance at whatever hyperbolic
+// excess speed (v-infinity) the escape burn actually achieved. A better
+// escape burn gets you there faster, which is the real physics intuition,
+// without simulating the Sun's gravity or an actual trajectory at all.
+const MARS_DISTANCE_M = 5.14e9; // ~54.6M km real closest-approach distance, scaled by the same ~9.42% factor the planet radii use (see RSX.PLANETS.mars)
+let missionPhase = "home";      // "home" | "coast" | "mars"
+let canCommitToMars = false, escapeVinf = 0;
+let coastRemainingM = 0, coastElapsedS = 0, coastVinf = 0, coastWarp = 20000;
+let marsArrivalSnapshot = null; // lets R retry just the landing, not the whole trip
+
+// Icon-mode zoom clamp (design/visual-realism.md §7.2): this frame's boosted
+// vehicle drawing scale, smoothed like cam's own logPpm below so crossing
+// the 14px floor blends in rather than popping. iconState is the small
+// persistent object worldToBodyFrame()'s click hit-testing reads, so a
+// click on the boosted (enlarged) sprite still resolves to the right part.
+let iconPpmSmoothed = 28.0; // matches makeCamera()'s initial ppm -- no boost needed sitting on the pad
+const iconState = { scale: 1 };
+
+window.RSXDEBUG = {
+  S, ctrl, veh, cam, particles,
+  get planet() { return planet; }, // getter, not a shorthand value: arriveAtMars() reassigns the outer `planet` binding, and a plain `planet,` here would have frozen in the ORIGINAL object reference at RSXDEBUG-construction time
+  get cssW() { return cssW; }, get cssH() { return cssH; },
+  get ignitionT() { return ignitionT; },
+  get countdownStart() { return countdownStart; },
+  get commandedThrottle() { return commandedThrottle; },
+  get rampComplete() { return rampComplete; },
+  get iconScale() { return iconState.scale; },
+  get missionPhase() { return missionPhase; },
+  get canCommitToMars() { return canCommitToMars; },
+  get coastRemainingM() { return coastRemainingM; },
+};
 
 // Computed-torque attitude controller (design/flight-physics.md §9.1): the
 // plant gain varies by orders of magnitude over a flight as thrust, inertia
@@ -78,11 +334,79 @@ function gimbalControl(dt, pa) {
 }
 
 function resetToPad() {
+  planet = RSX.PLANETS.home; // no-op unless called back from "coast"/"mars" -- R always returns to a known-good state
+  missionPhase = "home"; canCommitToMars = false; escapeVinf = 0;
   S.rx = 0; S.ry = planet.R; S.vx = -planet.wp * planet.R; S.vy = 0;
   S.th = Math.PI / 2; S.om = 0; S.t = 0;
   ctrl.throttle = 0; ctrl.gimbal = 0; ctrl.thetaCmd = Math.PI / 2;
   cache.valid = false; ignitionT = null; crashed = false; crashMsg = "";
-  veh.parts.find(p => p.name === "tank").propMass = 4600;
+  countdownStart = null; commandedThrottle = 0; rampComplete = false; // full sequence reset, not just the pad-pin
+  // Refill to the TANK'S OWN capacity, not a hardcoded 4600: after an engine/fuel
+  // swap (below) propMassFull changes with the fuel's bulk density, and R must
+  // refill to THAT capacity or a reset after swapping fuels would silently load
+  // the old RP-1 tank size into the new tank. Matches the default vehicle
+  // (propMassFull starts at 4600) exactly when no swap has happened yet.
+  const tankPart = veh.parts.find(p => p.name === "tank");
+  tankPart.propMass = tankPart.propMassFull;
+  veh.mp = RSX.massProps(veh.parts);
+  particles.n = 0;
+}
+
+// Escape check (design/critique.md's single-body-only ruling means this is
+// the ENTIRE interplanetary model: a real specific-orbital-energy test
+// against home alone, not a multi-body patched-conic search). Clear of the
+// atmosphere is a practical/thematic gate on top of the energy test --
+// drag would immediately invalidate a "hyperbolic" reading picked up while
+// still deep in the atmosphere anyway.
+function updateMarsEscapeCheck() {
+  if (missionPhase !== "home" || crashed) { canCommitToMars = false; return; }
+  const r = Math.hypot(S.rx, S.ry), v = Math.hypot(S.vx, S.vy);
+  const eps = 0.5 * v * v - planet.mu / r; // specific orbital energy; >0 means hyperbolic (escaping)
+  const clearOfAtmosphere = (r - planet.R) > planet.zAtm;
+  canCommitToMars = eps > 0 && clearOfAtmosphere;
+  escapeVinf = canCommitToMars ? Math.sqrt(2 * eps) : 0; // hyperbolic excess speed -- what the coast actually uses
+}
+
+function commitToMarsTransfer() {
+  if (!canCommitToMars) return;
+  missionPhase = "coast";
+  coastVinf = escapeVinf;
+  coastRemainingM = MARS_DISTANCE_M;
+  coastElapsedS = 0;
+  coastWarp = 20000;
+  canCommitToMars = false;
+}
+
+function updateCoast(dt) {
+  coastRemainingM = Math.max(0, coastRemainingM - coastVinf * coastWarp * dt);
+  coastElapsedS += coastWarp * dt;
+  if (coastRemainingM <= 0) arriveAtMars();
+}
+
+// Hands off from the abstracted coast to a REAL Mars flight -- from here on
+// every existing system (physics, atmosphere, camera, click-to-inspect,
+// engine picker) just runs unchanged against whatever `planet` now is; none
+// of it was ever hardcoded to home.
+const MARS_ARRIVAL_ALT_M = 18000, MARS_ARRIVAL_VY = -450; // begins a suicide-burn-style landing challenge, not a leisurely circular orbit
+function arriveAtMars() {
+  planet = RSX.PLANETS.mars;
+  S.rx = 0; S.ry = planet.R + MARS_ARRIVAL_ALT_M; S.vx = -planet.wp * S.ry; S.vy = MARS_ARRIVAL_VY;
+  S.th = Math.PI / 2; S.om = 0; S.t = 0;
+  ctrl.throttle = 0; ctrl.gimbal = 0; ctrl.thetaCmd = Math.PI / 2;
+  commandedThrottle = 0; countdownStart = null;
+  ignitionT = simTime - 0.5; rampComplete = true; // already mid-flight/"hot" -- no ground-style T-6 countdown for a relight (same convention RSXSetState uses for a debug teleport)
+  cache.valid = false; crashed = false; crashMsg = "";
+  missionPhase = "mars";
+  marsArrivalSnapshot = { ry: S.ry, vy: S.vy, propMass: veh.parts.find(p => p.name === "tank").propMass };
+}
+function resetToMarsArrival() {
+  if (missionPhase !== "mars" || !marsArrivalSnapshot) return;
+  S.rx = 0; S.ry = marsArrivalSnapshot.ry; S.vx = -planet.wp * S.ry; S.vy = marsArrivalSnapshot.vy;
+  S.th = Math.PI / 2; S.om = 0; S.t = 0;
+  ctrl.throttle = 0; ctrl.gimbal = 0; ctrl.thetaCmd = Math.PI / 2;
+  commandedThrottle = 0; countdownStart = null; ignitionT = simTime - 0.5; rampComplete = true;
+  cache.valid = false; crashed = false; crashMsg = "";
+  veh.parts.find(p => p.name === "tank").propMass = marsArrivalSnapshot.propMass;
   veh.mp = RSX.massProps(veh.parts);
   particles.n = 0;
 }
@@ -90,16 +414,75 @@ function resetToPad() {
 function spawnPadSmoke(dt) {
   const alt = Math.hypot(S.rx, S.ry) - planet.R;
   if (ctrl.throttle <= 0.01 || alt > 200) return;
-  const rate = 90 * (1 - RSX.clamp(alt / 200, 0, 1));
+  // Wider, bigger, longer-lived than a single hobby-rocket puff trail --
+  // a real liftoff billows into a ground-hugging cloud bank that spreads
+  // well past the pad itself (design/visual-realism.md §6.8's "T+0->+6s pad
+  // smoke cloud at full emission"), not a thin plume from one point.
+  const rate = 160 * (1 - RSX.clamp(alt / 200, 0, 1));
   const n = rate * dt;
   const whole = Math.floor(n) + (Math.random() < (n % 1) ? 1 : 0);
-  const nozzleWorldX = S.rx, nozzleWorldY = S.ry - veh.mp.s_cm; // approx, world-ish for a vertical pad rocket
   for (let i = 0; i < whole; i++) {
     const side = Math.random() < 0.5 ? -1 : 1;
-    const vx = side * (18 + Math.random() * 16);
-    const vy = 2 + Math.random() * 7;
-    RSX.render.spawnParticle(particles, side * 4, 0, vx, vy, 3 + Math.random() * 3, 9 + Math.random() * 7, 0, Math.random());
+    const spread = 3 + Math.random() * 6;
+    const vx = side * (14 + Math.random() * 18);
+    const vy = 1.5 + Math.random() * 6;
+    RSX.render.spawnParticle(particles, side * spread, 0, vx, vy, 4 + Math.random() * 4, 11 + Math.random() * 9, 0, Math.random());
   }
+}
+
+// Pre-ignition countdown effects (design/visual-realism.md §4): reuses the
+// existing smoke (type 0) particles as a stand-in for the design doc's
+// "water deluge" vent steam -- no new particle type needed for that part --
+// and spawns the new spark (type 1) particles from T-3 as a ROFI-sparkler
+// stand-in. Both stop the instant the countdown ends (T-0): from there the
+// real plume/pad-smoke systems take over visually.
+function spawnPreIgnitionEffects(dt, tRel) {
+  // vents: T-6 .. T-0, low rate (well under the 90/s post-liftoff pad-smoke
+  // rate), whitish, rising -- 1-2 pad-adjacent points, same spawn style as
+  // spawnPadSmoke() above so it reads as one continuous effect at liftoff.
+  const ventRate = 5;
+  const nVent = ventRate * dt;
+  const wholeVent = Math.floor(nVent) + (Math.random() < (nVent % 1) ? 1 : 0);
+  for (let i = 0; i < wholeVent; i++) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    RSX.render.spawnParticle(particles, side * 3.5, 0, side * (1 + Math.random() * 2), 4 + Math.random() * 2, 1 + Math.random(), 3 + Math.random() * 2, 0, Math.random());
+  }
+  // sparks: T-3 .. T-0 only, short-lived, outward+upward -- RR.updateParticles
+  // pulls type-1 particles down with real gravity (no bounce, per spec "a
+  // simplified version without the bounce is fine").
+  if (tRel >= -SPARK_T) {
+    const sparkRate = 20; // 15-25/s per design doc
+    const nSpark = sparkRate * dt;
+    const wholeSpark = Math.floor(nSpark) + (Math.random() < (nSpark % 1) ? 1 : 0);
+    for (let i = 0; i < wholeSpark; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const vx = side * (6 + Math.random() * 10);
+      const vy = 4 + Math.random() * 8;
+      RSX.render.spawnParticle(particles, side * 3, 0, vx, vy, 0.05, 0.4 + Math.random() * 0.5, 1, Math.random());
+    }
+  }
+}
+
+// Drives ctrl.throttle from countdownStart/commandedThrottle each frame --
+// the ONLY place ctrl.throttle is set for a REAL (non-QA-override) ignition,
+// per the timeline in design/visual-realism.md §4. Liftoff itself is never
+// scripted here: stepPhysics()'s existing pad-pin sees the ramping thrust
+// cross vehicle weight on its own, exactly like the old instant-throttle path
+// did, just later and continuously instead of in one step.
+function updateIgnitionSequence(simTimeNow, dt) {
+  if (crashed) return; // stepPhysics() already zeroed ctrl.throttle on ground impact -- this wall-time-driven ramp must not resurrect it on a wrecked, motionless vehicle
+  if (countdownStart == null) return;
+  const tRel = simTimeNow - countdownStart - COUNTDOWN_S; // seconds relative to T-0
+  if (tRel < 0) {
+    ctrl.throttle = 0;
+    spawnPreIgnitionEffects(dt, tRel);
+    return;
+  }
+  if (ignitionT == null) ignitionT = simTimeNow; // T-0 reached this frame -- unchanged "engine lit" moment
+  const rampFrac = RSX.clamp(tRel / THROTTLE_RAMP_S, 0, 1);
+  const eased = 0.5 - 0.5 * Math.cos(Math.PI * rampFrac); // smooth 0->1 raised-cosine ease-in-out -- slowest at both ends, fastest through the midpoint (not linear, not an instant step)
+  ctrl.throttle = commandedThrottle * eased;
+  if (rampFrac >= 1) { countdownStart = null; rampComplete = true; } // sequence over -- direct Z/X throttle control resumes
 }
 
 function stepPhysics(dtWall) {
@@ -174,14 +557,79 @@ function stepPhysics(dtWall) {
 
 function fmtT(v, d) { return v.toFixed(d == null ? 1 : d); }
 
+// Physics runs in true PCI coords (planet-centered), and the pad itself
+// co-rotates with the planet -- S.rx starts at 0 but drifts by hundreds
+// of metres per second in inertial coordinates even for a vehicle sitting
+// still relative to the ground (that's what its initial vx represents).
+// Rendering (and, below, click hit-testing) needs the vehicle's position
+// relative to the pad's CURRENT (rotated) location, in a frame that
+// rotates along with it, or the pad -- and everything launched from it --
+// appears to rocket sideways off screen immediately after liftoff. Flat-
+// ground approximation: rotate by the pad's angle at time S.t rather than
+// doing a full tangent-frame/great-circle transform. Factored out of
+// draw() so the click handler's world-space inverse transform uses this
+// EXACT same computation instead of a second, driftable copy of it.
+function padLocalXY() {
+  const padAngle = Math.PI / 2 + planet.wp * S.t;
+  const padUx = Math.cos(padAngle), padUy = Math.sin(padAngle);
+  const dxPad = S.rx - planet.R * padUx, dyPad = S.ry - planet.R * padUy;
+  const localX = dxPad * Math.sin(padAngle) - dyPad * Math.cos(padAngle);
+  const localY = dxPad * padUx + dyPad * padUy;
+  return { localX, localY };
+}
+
+// Nose tip in world space, from the pad-relative local frame: the vehicle's
+// CM sits at (localX, localY), and the nose is s_cm ahead of the CM along
+// the body's current heading S.th. Factored out (same reasoning as
+// padLocalXY() above) so the click handler's body-frame inverse transform
+// can't drift from what draw() actually renders.
+function noseWorldXY(localX, localY) {
+  const s_cm = veh.mp.s_cm;
+  return { noseWorldX: localX + s_cm * Math.cos(S.th), noseWorldY: localY + s_cm * Math.sin(S.th) };
+}
+
+// World-space point at an arbitrary body station s (m from nose, +aft) --
+// generalizes noseWorldXY() (which is just this at s=0) so a caller needing
+// a point partway down the body (the umbilical's vehicle-side attach point)
+// doesn't re-derive the rotation by hand.
+function stationWorldXY(localX, localY, s) {
+  const { noseWorldX, noseWorldY } = noseWorldXY(localX, localY);
+  return { x: noseWorldX - s * Math.cos(S.th), y: noseWorldY - s * Math.sin(S.th) };
+}
+
+// Deep-space coast screen: no world to render (this is a deliberately
+// abstracted time/distance countdown, not a simulated trajectory), so just
+// a starfield and a status readout through the existing #hud div rather
+// than hand-laying-out canvas text for a screen that's otherwise unrelated
+// to the flight HUD's per-frame numbers.
+function drawCoastScreen() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#05060A"; ctx.fillRect(0, 0, cssW, cssH);
+  ctx.globalAlpha = 0.9;
+  ctx.drawImage(starField, 0, 0, 1536, 1536, 0, 0, cssW, cssH);
+  ctx.globalAlpha = 1;
+
+  const totalS = MARS_DISTANCE_M / coastVinf;
+  const elapsedDays = coastElapsedS / 86400, totalDays = totalS / 86400;
+  const frac = RSX.clamp(1 - coastRemainingM / MARS_DISTANCE_M, 0, 1);
+  const barLen = 40, filled = RSX.clamp(Math.round(barLen * frac), 0, barLen);
+  const bar = "[" + "=".repeat(filled) + (filled < barLen ? ">" : "") + " ".repeat(Math.max(0, barLen - filled - 1)) + "]";
+
+  document.getElementById("hud").textContent =
+    `COASTING TO MARS\n` +
+    `EARTH ${bar} MARS\n` +
+    `${fmtT(coastRemainingM / 1e9, 3)} Mkm remaining of ${fmtT(MARS_DISTANCE_M / 1e9, 3)} Mkm  --  v∞=${fmtT(coastVinf, 0)}m/s\n` +
+    `Day ${fmtT(elapsedDays, 1)} of ~${fmtT(totalDays, 1)}  --  warp ${coastWarp.toLocaleString()}x\n` +
+    `[ / ] warp down/up    [R] abort transfer`;
+}
+
+const GROUND_COLOR = { home: "#3A3E33", mars: "#9C5A44" }; // Mars: iron-oxide rust, not Earth's dark olive
 function draw(t, dtWall) {
+  if (missionPhase === "coast") { drawCoastScreen(); return; }
   const alt = Math.hypot(S.rx, S.ry) - planet.R;
   const speed = Math.hypot(S.vx, S.vy);
-  // Physics runs in true PCI coords (planet-centered). Rendering uses a
-  // pad-relative local frame (localY ~= altitude) -- valid as a flat-ground
-  // approximation for this single-pad vertical-slice test; a full lateral-
-  // range/orbit renderer will need a proper tangent-frame transform.
-  const localX = S.rx, localY = S.ry - planet.R;
+  const { localX, localY } = padLocalXY();
+  const tankPart = veh.parts.find(p => p.name === "tank"); // hoisted -- also needed by the tower's umbilical below
   const pa = RSX.atmosphere(alt, planet).P;
   const q = cache.valid ? cache.d.q : 0;
   const twr = (veh.thrustNow(pa, ctrl.throttle)) / (veh.mp.m * RSX.GRAVITY_REF);
@@ -189,11 +637,12 @@ function draw(t, dtWall) {
   RSX.render.updateCamera(cam, {
     x: 0, y: alt, alt, speed, throttle: ctrl.throttle, twr, q, pa,
     descending: S.vy < 0 && alt > 200,
+    cssH, vehicleLengthM: veh.sTail + 1.5,
   }, dtWall, t);
 
   // ---- screen-space background: sky ----
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const sky = RSX.render.skyColorsAt(alt);
+  const sky = RSX.render.skyColorsAt(alt, planet.id === "mars" ? RSX.render.MARS_SKY_KEYFRAMES : null);
   const g = ctx.createLinearGradient(0, 0, 0, cssH);
   g.addColorStop(0, sky.zenith); g.addColorStop(0.35, sky.upper); g.addColorStop(0.70, sky.mid); g.addColorStop(1, sky.horizon);
   ctx.fillStyle = g; ctx.fillRect(0, 0, cssW, cssH);
@@ -229,38 +678,85 @@ function draw(t, dtWall) {
 
   // ground / curvature
   const geo = RSX.render.groundGeometry(ppm, planet.R, cssW, cssH);
-  ctx.fillStyle = "#3A3E33";
+  ctx.fillStyle = GROUND_COLOR[planet.id] || GROUND_COLOR.home;
   if (geo.mode === "flat") {
     ctx.fillRect(-cssW / ppm, -50000, 2 * cssW / ppm, 50000);
-    // simple pad marking
-    ctx.fillStyle = "#555850"; ctx.fillRect(-15, -2, 30, 2);
+    // simple pad marking -- home only, there's no launch infrastructure on Mars
+    if (planet.id === "home") { ctx.fillStyle = "#555850"; ctx.fillRect(-15, -2, 30, 2); }
   } else {
     // (bezier/disc ground modes come later once we actually climb that high in this test)
     ctx.fillRect(-cssW / ppm, -50000, 2 * cssW / ppm, 50000);
   }
 
-  // pad smoke (behind rocket)
+  // launch tower (design/visual-realism.md §6.8): pure background art, fixed
+  // in the SAME pad-local frame as the ground/pad marking above -- it never
+  // touches the vehicle transform, and it's gone entirely once "above 3 km"
+  // (design doc's LOD rule) instead of shrinking to a speck. Home only --
+  // nobody built a tower on Mars.
+  if (alt <= 3000 && planet.id === "home") {
+    // Two attach points (tank height for the lower/umbilical arm, probe
+    // height for the upper capture arm) instead of one bare cable -- a real
+    // orbital launch mount grips the vehicle with structural arms, not just
+    // an umbilical. Both retract at T-0, same as the umbilical always did.
+    const armAttach = ignitionT == null
+      ? { lower: stationWorldXY(localX, localY, tankPart.s), upper: stationWorldXY(localX, localY, 1.85) }
+      : null;
+    RSX.render.drawLaunchTower(ctx, ppm, t, armAttach);
+  }
+
+  // pad smoke (behind rocket) -- ground glow first so the cloud reads as lit
+  // from within/below, matching real launch photography's golden-hour look
   ctx.save();
   ctx.translate(localX, 0);
+  RSX.render.drawGroundGlow(ctx, ctrl.throttle, alt);
   RSX.render.drawSmokeParticles(ctx, particles, puffSprite, veh.propKey, ppm);
+  RSX.render.drawSparkParticles(ctx, particles, ppm);
   ctx.restore();
 
+  // Icon-mode zoom clamp (design/visual-realism.md §7.2): once the vehicle
+  // would render below MIN_VEHICLE_PX it fades toward invisible as altitude
+  // climbs -- the literal cause of the reported "fading" (there is no actual
+  // opacity fade on the vehicle anywhere). Decouple the vehicle's LOCAL
+  // drawing scale from the true world ppm once that happens; its ORIGIN
+  // (noseWorldX/Y below) still tracks the true world position untouched --
+  // only ctx.scale() inside the vehicle/plume transforms changes, never
+  // cam.logPpm itself, so the ground/tower/pad-smoke stay at true scale.
+  // 14px (the design doc's own figure) turned out too small to read as a
+  // rocket rather than a sliver against bright sky -- reported directly
+  // ("i can't see the rocket") at ~8px actual size. Bumped to a size that
+  // still clearly reads as rocket-shaped, not just a colored dot.
+  const MIN_VEHICLE_PX = 36;
+  const vehicleLengthM = veh.sTail + 1.5; // rough nose-to-bell-tip; exact value doesn't matter
+  const targetEffectivePpm = Math.max(ppm, MIN_VEHICLE_PX / vehicleLengthM);
+  iconPpmSmoothed += (targetEffectivePpm - iconPpmSmoothed) * (1 - Math.exp(-1.0 * dtWall)); // ~1s blend, no pop
+  // Floor the persisted smoothing state at the TRUE ppm, not just the derived ratio
+  // below: once true ppm alone exceeds the floor, targetEffectivePpm IS ppm itself --
+  // a rising target during descent back through the icon-mode threshold -- and an
+  // EMA chasing a rising target structurally lags BELOW it. Left unclamped that
+  // shows up as iconScale<1 (vehicle+plume rendered SMALLER than true scale) for a
+  // couple seconds after crossing back above the threshold. Snapping the smoothed
+  // value itself (rather than just clamping iconScale) also keeps it consistent
+  // with the direct ppm-in-screen-px consumers below (drawNoseCone etc.), and
+  // guarantees iconScale never dips under 1.0 -- it degrades gracefully TO 1.0,
+  // never past it.
+  iconPpmSmoothed = Math.max(iconPpmSmoothed, ppm);
+  const iconScale = iconPpmSmoothed / ppm; // 1.0 when not in icon mode, >1.0 once boosted -- floored at 1.0 by the snap above
+  iconState.scale = iconScale; // read by worldToBodyFrame() so a click on the boosted sprite still hits
+
   // ---- rocket ----
-  const s_cm = veh.mp.s_cm;
-  const noseWorldX = localX + s_cm * Math.cos(S.th);
-  const noseWorldY = localY + s_cm * Math.sin(S.th);
+  const { noseWorldX, noseWorldY } = noseWorldXY(localX, localY);
   ctx.save();
   ctx.translate(noseWorldX, noseWorldY);
   ctx.rotate(S.th + Math.PI / 2); // local +y (aft) -> world -bHat
+  ctx.scale(iconScale, iconScale); // no-op at true scale; boosts apparent size only, origin unchanged
 
-  const tankPart = veh.parts.find(p => p.name === "tank");
   const burnTime = ignitionT != null ? (t - ignitionT) : 0;
   const sootLevel = RSX.clamp(0.45 * RSX.clamp((burnTime - 5) / 60, 0, 1), 0, 1) > 0 ? Math.round(RSX.clamp((burnTime - 5) / 60, 0, 1) * 5) / 5 : 0;
 
-  RSX.render.drawNoseCone(ctx, veh.art.noseLen, veh.art.noseDia, "white", ppm);
+  RSX.render.drawNoseCone(ctx, veh.art.noseLen, veh.art.noseDia, "white", iconPpmSmoothed);
   ctx.save(); ctx.translate(0, veh.art.noseLen);
-  RSX.render.drawBodySegment(ctx, veh.art.bodyLen, veh.art.bodyDia, "white", ppm, sootLevel);
-  RSX.render.drawFins(ctx, veh.art.bodyDia, veh.art.finRootChord, veh.art.finSpan, null, veh.art.bodyLen, ppm);
+  RSX.render.drawBodySegment(ctx, veh.art.bodyLen, veh.art.bodyDia, "white", iconPpmSmoothed, sootLevel);
+  RSX.render.drawFins(ctx, veh.art.bodyDia, veh.art.finRootChord, veh.art.finSpan, null, veh.art.bodyLen, iconPpmSmoothed);
   ctx.restore();
 
   const bellRt = veh.motor.nozzle.throatD / 2, bellRe = veh.motor.nozzle.exitD / 2;
@@ -270,12 +766,15 @@ function draw(t, dtWall) {
   ctx.restore();
   ctx.restore(); // end vehicle transform
 
-  // plume: drawn in the SAME rotated frame as the engine, at the bell exit
+  // plume: drawn in the SAME rotated frame as the engine, at the bell exit --
+  // same iconScale so it stays visually attached to the boosted-size rocket
+  // instead of rendering at true (tiny) scale next to an enlarged rocket.
   ctx.save();
   ctx.translate(noseWorldX, noseWorldY);
   ctx.rotate(S.th + Math.PI / 2 + ctrl.gimbal);
+  ctx.scale(iconScale, iconScale);
   const pc = veh.motor.pcDesign * ctrl.throttle;
-  RSX.render.drawPlume(ctx, veh.motor, pc, pa, ctrl.throttle, veh.propKey, t, veh.sTail + Ln, ppm);
+  RSX.render.drawPlume(ctx, veh.motor, pc, pa, ctrl.throttle, veh.propKey, t, veh.sTail + Ln, iconPpmSmoothed);
   ctx.restore();
 
   if (ignitionT != null) {
@@ -286,10 +785,24 @@ function draw(t, dtWall) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   RSX.render.drawExposure(ctx, cssW, cssH, RSX.render.FUEL_VIS[veh.propKey].baseOpacity, ctrl.throttle, ignitionT != null ? t - ignitionT : null, dpr);
 
+  // Countdown/ramp/escape status line: countdown+ramp (design/visual-realism.md
+  // §4 timeline) takes priority since it's time-critical; the Mars-escape
+  // prompt only matters once well clear of the atmosphere, long after any
+  // launch countdown has finished, so the two never actually compete.
+  let seqStatus = null;
+  if (countdownStart != null) {
+    const tRel = t - countdownStart - COUNTDOWN_S;
+    seqStatus = tRel < 0
+      ? `T-${fmtT(-tRel, 1)}s  [${tRel < -SPARK_T ? "VENTING" : "IGNITION SEQUENCE"}]`
+      : `T+${fmtT(tRel, 1)}s  [SPOOLING UP]`;
+  } else if (canCommitToMars) {
+    seqStatus = `ESCAPE TRAJECTORY  v∞=${fmtT(escapeVinf, 0)}m/s  [M] COMMIT TO MARS TRANSFER`;
+  }
+
   document.getElementById("hud").textContent =
-    `t=${fmtT(t,2)}  alt=${fmtT(alt,1)}m  v=${fmtT(speed,1)}m/s  throttle=${fmtT(ctrl.throttle*100,0)}%\n` +
+    `${planet.name.toUpperCase()}  t=${fmtT(t,2)}  alt=${fmtT(alt,1)}m  v=${fmtT(speed,1)}m/s  throttle=${fmtT(ctrl.throttle*100,0)}%\n` +
     `pa=${fmtT(pa,0)}Pa  q=${fmtT(q,0)}Pa  TWR=${fmtT(twr,2)}  prop=${fmtT(tankPart.propMass,0)}kg\n` +
-    (crashed ? crashMsg : `[Z] full throttle  [X] cut  [SPACE] ignite  [R] reset`);
+    (crashed ? crashMsg : (seqStatus || `[Z/SPACE] ignite  [X] cut  [R] reset`));
 }
 function hexToRgbLocal(hex) {
   const h = hex.replace("#", "").replace(/^rgb\(|\)$/g, "");
@@ -305,20 +818,424 @@ function frame(ts) {
   lastFrameT = tSec;
   simTime += dtWall;
 
-  stepPhysics(dtWall);
-  spawnPadSmoke(dtWall);
-  RSX.render.updateParticles(particles, dtWall);
+  if (missionPhase === "coast") {
+    updateCoast(dtWall);
+  } else {
+    updateMarsEscapeCheck();
+    updateIgnitionSequence(simTime, dtWall);
+    stepPhysics(dtWall);
+    spawnPadSmoke(dtWall);
+    RSX.render.updateParticles(particles, dtWall);
+  }
   draw(simTime, dtWall);
 
   requestAnimationFrame(frame);
 }
 
 window.addEventListener("keydown", e => {
-  if (e.code === "KeyR") { resetToPad(); return; }
+  if (e.code === "KeyR") {
+    if (missionPhase === "mars") resetToMarsArrival(); else resetToPad();
+    return;
+  }
+  if (missionPhase === "coast") {
+    if (e.code === "BracketRight") coastWarp = Math.min(coastWarp * 2, 200000);
+    if (e.code === "BracketLeft") coastWarp = Math.max(coastWarp / 2, 1000);
+    return;
+  }
   if (crashed) return;
-  if (e.code === "Space") { if (ignitionT == null) ignitionT = simTime; ctrl.throttle = 1; }
-  if (e.code === "KeyZ") ctrl.throttle = 1;
-  if (e.code === "KeyX") ctrl.throttle = 0;
+  if (e.code === "KeyM" && canCommitToMars) { commitToMarsTransfer(); return; }
+  if (e.code === "Space" || e.code === "KeyZ") {
+    commandedThrottle = 1;
+    if (countdownStart == null) {
+      if (ignitionT == null) {
+        countdownStart = simTime; // starts the T-6 countdown; ctrl.throttle stays 0 until T-0 (updateIgnitionSequence drives it)
+      } else if (rampComplete) {
+        ctrl.throttle = commandedThrottle; // ramp genuinely finished -- normal direct throttle control resumes
+      } else {
+        // T-0 was reached before, but KeyX aborted the ramp before it finished --
+        // ease back up from 0 instead of snapping straight to commandedThrottle.
+        // Skip the T-6 vent/spark countdown (the engine's already been lit once):
+        // backdating countdownStart by exactly COUNTDOWN_S makes updateIgnitionSequence
+        // see tRel~=0 on the very next frame, i.e. a fresh 1.8s ramp starting now.
+        countdownStart = simTime - COUNTDOWN_S;
+      }
+    }
+    // else: countdown or ramp already in progress -- updateIgnitionSequence owns ctrl.throttle until it completes
+  }
+  if (e.code === "KeyX") {
+    commandedThrottle = 0;
+    ctrl.throttle = 0; // valve close is fast -- also aborts a countdown/ramp in progress
+    countdownStart = null; // full sequence reset, matching a real abort
+  }
+});
+
+/* =====================================================================
+   PART-INSPECT / ENGINE-COMPARE — click the rocket to inspect its parts;
+   click the engine (mount+bell, one functional region) to compare/choose
+   engines and fuels with a live outcome preview. Purely additive: reads
+   veh/S/cam/planet, and on Apply swaps ONLY veh.motor, the tank part's
+   dryMass/propMass/propMassFull, the mount part's dryMass, and
+   veh.propKey (never touches stepPhysics/gimbalControl/RSX.stepVerlet or
+   any control-loop constant). Non-modal -- the rAF loop above keeps
+   running exactly as before while this panel is open.
+   ===================================================================== */
+
+// Catalog nozzle geometry chosen so the REAL thrustN()/massFlow() outputs
+// land close to the design pass's reference copy numbers below (ENG-K1 is
+// not a free choice -- it's the exact nozzle already built into
+// RSX.testVehicle.build()); the copy text is fixed reference prose, the
+// live preview always calls the real physics functions regardless. exitD
+// on ENG-KV/ENG-H1 is also kept within a few % of the reference Isp so the
+// renderer's actual bell length (Ln = 1.4*(Re-Rt)/tan15deg,
+// RSX.render.drawEngineBell) stays comfortably inside the "engine" hit
+// region's s<=12.0 aft bound (bell tips land around s=10.05, ~2m of
+// margin) -- a much larger exit could still push a bell tip out of reach.
+const ENGINE_CATALOG = [
+  { id: "ENG-K1", name: "Vulcan-1", fuelKey: "rp1", throatD: 0.1450, exitD: 0.5800, pcDesign: 10.0e6, dryMass: 630, gimbalDeg: 8, minThrottlePct: 40, hasSL: true },
+  { id: "ENG-KV", name: "Vulcan-V", fuelKey: "rp1", throatD: 0.1200, exitD: 1.2500, pcDesign: 11.5e6, dryMass: 480, gimbalDeg: 6, minThrottlePct: 55, hasSL: false },
+  { id: "ENG-M1", name: "Prometheus", fuelKey: "ch4", throatD: 0.1920, exitD: 1.3000, pcDesign: 25.0e6, dryMass: 1700, gimbalDeg: 15, minThrottlePct: 25, hasSL: true },
+  { id: "ENG-H1", name: "Aquila", fuelKey: "lh2", throatD: 0.1300, exitD: 1.2600, pcDesign: 6.0e6, dryMass: 320, gimbalDeg: 4, minThrottlePct: 20, hasSL: false },
+];
+const engineById = id => ENGINE_CATALOG.find(e => e.id === id);
+
+const PART_CONTENT = {
+  nose: {
+    title: "NOSE CONE",
+    body: "Ogive nose cone, 1.6 m long, 60 kg dry — no propellant, no moving parts. Its shape fixes the forward C_Nα at 2.0 and puts its centre-of-pressure contribution at s ≈ 0.75 m (0.466 of its length back from the tip) — the forward-most term in the vehicle's stability margin. Every gram here is pure dead weight the engine has to carry the whole flight."
+  },
+  probe: {
+    title: "PROBE / AVIONICS BAY",
+    body: "0.5 m bay between the nose and the tank, 90 kg dry, carrying guidance and instrumentation and passing bending loads down the stack. No propellant and no aerodynamic contribution of its own — nothing here changes no matter which engine you pick below."
+  },
+  tank: {
+    title: "PROPELLANT TANK",
+    body: "4.0 m tank, 230 kg dry, holding up to 4,600 kg of propellant in ~4.5 m³ of volume — currently RP-1. Volume is fixed, so the engine (and fuel) you pick below decides how much mass actually fits: CH4 (833 kg/m³) already holds less than RP-1 (1023), and LH2 (344 kg/m³, about a third the density) fills the same tank with far less mass for far higher Isp. Propellant settles aft as it drains, walking the vehicle's centre of mass back through the burn."
+  },
+  fins: {
+    title: "FINS",
+    body: "Two fins at the tail, 1.0 m root chord x 0.9 m span, reaching from the body's 0.6 m radius out to 1.5 m. Mounted well aft, they add C_Nα = 6.0 of restoring lift, pulling the centre of pressure behind the centre of mass — the passive force that keeps the vehicle flying nose-first instead of tumbling. Their own geometry never changes with engine choice, but swapping engines still shifts the centre of mass, and with it, how much stability margin they buy."
+  },
+  engine: {
+    title: "ENGINE",
+    body: "Mount and nozzle bell act as one part — the engine you pick decides the propellant that fills the tank above. Compare all four real combinations below; each fills the same ~4.5 m³ tank with a different propellant mass, so watch the OUTCOME strip update as you hover or select. Solid propellant isn't offered here — it needs a dedicated grain-burn motor, not this liquid nozzle."
+  },
+};
+
+const ENGINE_CONTENT = {
+  "ENG-K1": {
+    tagline: "Balanced RP-1 workhorse — the engine currently mounted, tuned for sea-level liftoff.",
+    pros: [
+      "257 kN sea-level / 284 kN vacuum thrust — the only RP-1 engine in the catalog rated for sea-level flight at all.",
+      "8° gimbal and a 40% throttle floor — the widest steering and throttle range of the two RP-1 engines (Vulcan-V: 6°, 55%)."
+    ],
+    cons: [
+      "320 s vacuum Isp is the lowest in the catalog — Vulcan-V gets 28 s more on the same RP-1, Aquila gets 139 s more.",
+      "630 kg dry is the heaviest of the two RP-1 engines, 150 kg over Vulcan-V, for less vacuum Isp."
+    ]
+  },
+  "ENG-KV": {
+    tagline: "Vacuum-stretched RP-1 bell — the best Isp on kerosene, but flow-separates near sea level.",
+    pros: [
+      "348 s vacuum Isp — the best of any RP-1 engine, 28 s above Vulcan-1 on the same storable propellant.",
+      "480 kg dry, 150 kg lighter than Vulcan-1 — a free TWR gain before the Isp advantage even counts."
+    ],
+    cons: [
+      "No rated sea-level thrust: the wide 1.27 m exit over-expands in dense air and flow-separates below ~11 km, where the sim's existing separation penalty already cuts thrust to 0.85x.",
+      "Narrowest gimbal (6°) and highest throttle floor (55%) of the two RP-1 engines — the least steering and throttle range."
+    ]
+  },
+  "ENG-M1": {
+    tagline: "Full-flow methalox — by far the most thrust here, built for deep-throttle landing burns.",
+    pros: [
+      "1,200 kN sea-level / 1,320 kN vacuum thrust — about 4.7x Vulcan-1's and nearly 9x Aquila's vacuum thrust, from the highest chamber pressure in the catalog (25 MPa).",
+      "309 s sea-level / 340 s vacuum Isp beats Vulcan-1 on both ends despite the thrust, plus a 25% throttle floor and 15° gimbal for relightable, steerable landing burns."
+    ],
+    cons: [
+      "1,700 kg dry is the heaviest engine here — on its own heavier than the nose, probe, and tank's combined dry structure (380 kg).",
+      "396 kg/s mdot drains a full 4,600 kg tank in about 12 seconds at full throttle, and needs cryogenic CH4 that boils off in the tank — RP-1 does not."
+    ]
+  },
+  "ENG-H1": {
+    tagline: "Cryogenic hydrolox — the Isp ceiling in the catalog, at the cost of thrust and tank capacity.",
+    pros: [
+      "459 s vacuum Isp — the highest in the catalog, 139 s (43%) above Vulcan-1's 320 s.",
+      "Lightest engine here at 320 kg dry and relightable up to 8 times — built for multi-burn upper-stage or landing work, not launch."
+    ],
+    cons: [
+      "Only 150 kN vacuum thrust, about two-thirds of the next-lowest option (Vulcan-V's 236 kN) — a weak liftoff TWR on its own.",
+      "LH2's bulk density (344 kg/m³) is about a third of RP-1's (1023) — the same tank ends up carrying far less propellant mass, plus the worst boiloff rate in the catalog."
+    ]
+  },
+};
+
+const PROP_COLOR = { solid: "var(--prop-solid)", rp1: "var(--prop-rp1)", ch4: "var(--prop-ch4)", lh2: "var(--prop-lh2)" };
+
+// ---- live outcome preview + apply (verbatim from spec) ----
+function previewEngine(eng, throttle, pa) {
+  const fuel = RSX.FUEL_PRESETS[eng.fuelKey].propellant;
+  const hypMotor = { ...RSX.makeMotor({ cstar: fuel.cstar, k: fuel.k }, null,
+    { throatD: eng.throatD, exitD: eng.exitD, efficiency: 0.94 }), type: 'liquid', pcDesign: eng.pcDesign };
+  const pc = hypMotor.pcDesign * RSX.clamp(throttle, 0, 1);
+  const thrust = pc > 0 ? RSX.thrustN(hypMotor, pc, pa) : 0;
+  const mdot = pc > 0 ? RSX.massFlow(hypMotor, pc) : 0;
+  const isp = mdot > 0 ? thrust / (mdot * RSX.GRAVITY_REF) : 0;
+  const tankPart = veh.parts.find(p => p.name === 'tank');
+  const mountPart = veh.parts.find(p => p.name === 'mount');
+  // Match applyEngine()'s fill-fraction preservation: the panel is non-modal
+  // and can be opened mid-flight, so the preview must show what Apply would
+  // ACTUALLY produce right now (partly-burned tank), not a hypothetical full
+  // one -- pre-launch fillFrac is 1 so this is a no-op in the common case.
+  // Percentage deltas between two previewEngine() calls are unaffected
+  // (fillFrac cancels out of any current-vs-selected ratio).
+  const fillFrac = tankPart.propMass / tankPart.propMassFull;
+  const tankVolumeM3 = tankPart.propMassFull / RSX.FUEL_PRESETS[veh.propKey].propellant.bulkDensity;
+  const newPropMassFullCap = tankVolumeM3 * fuel.bulkDensity;
+  const newPropMassFull = newPropMassFullCap * fillFrac;
+  const newTankDryMass = newPropMassFullCap * fuel.tankDryFrac;
+  const newTotalMass = veh.mp.m - tankPart.dryMass - tankPart.propMass - mountPart.dryMass
+    + newTankDryMass + newPropMassFull + eng.dryMass;
+  const twr = newTotalMass > 0 ? thrust / (newTotalMass * RSX.GRAVITY_REF) : 0;
+  return { thrust, mdot, isp, newPropMassFull, newTankDryMass, twr };
+}
+
+function applyEngine(eng) {
+  const tankPart = veh.parts.find(p => p.name === 'tank');
+  const mountPart = veh.parts.find(p => p.name === 'mount');
+  const fuel = RSX.FUEL_PRESETS[eng.fuelKey].propellant;
+  const tankVolumeM3 = tankPart.propMassFull / RSX.FUEL_PRESETS[veh.propKey].propellant.bulkDensity;
+  const fillFrac = tankPart.propMass / tankPart.propMassFull;
+  const newPropMassFull = tankVolumeM3 * fuel.bulkDensity;
+  tankPart.propMassFull = newPropMassFull;
+  tankPart.propMass = newPropMassFull * fillFrac;
+  tankPart.dryMass = newPropMassFull * fuel.tankDryFrac;
+  mountPart.dryMass = eng.dryMass;
+  veh.motor = { ...RSX.makeMotor({ cstar: fuel.cstar, k: fuel.k }, null,
+    { throatD: eng.throatD, exitD: eng.exitD, efficiency: 0.94 }), type: 'liquid', pcDesign: eng.pcDesign };
+  veh.propKey = eng.fuelKey;
+  veh.mp = RSX.massProps(veh.parts);
+  cache.valid = false; // same invalidation pattern as resetToPad()/RSXSetState()
+}
+
+// ---- click hit-testing: screen CSS px -> world metres -> body-frame station/lateral ----
+function screenToWorld(screenX, screenY) {
+  const p = Math.exp(cam.logPpm);
+  const worldX = cam.x + (screenX - cssW * 0.5 - cam.shakeX) / p;
+  const worldY = cam.y - (screenY - cssH * cam.framingY - cam.shakeY) / p;
+  return { worldX, worldY };
+}
+function worldToBodyFrame(worldX, worldY) {
+  const { localX, localY } = padLocalXY();
+  const { noseWorldX, noseWorldY } = noseWorldXY(localX, localY);
+  const theta = S.th + Math.PI / 2;
+  const dx = worldX - noseWorldX, dy = worldY - noseWorldY;
+  const bx = dx * Math.cos(theta) + dy * Math.sin(theta);
+  const by = -dx * Math.sin(theta) + dy * Math.cos(theta);
+  // Icon mode (§7.2) can render the vehicle LARGER than true ppm -- divide
+  // out the same iconScale draw() used this frame, or a click on the now-
+  // bigger sprite would hit-test against its true (tiny) body-frame extent.
+  return { s: by / iconState.scale, x: bx / iconState.scale };
+}
+function hitTestPart(s, x) {
+  const ax = Math.abs(x);
+  if (s >= 6.1 && s <= 7.1 && ax > 0.6 && ax <= 1.5) return "fins";
+  if (s >= 0.0 && s <= 1.6 && ax <= 0.6) return "nose";
+  if (s >= 1.6 && s <= 2.1 && ax <= 0.6) return "probe";
+  if (s >= 2.1 && s <= 6.1 && ax <= 0.6) return "tank";
+  if ((s >= 6.1 && s <= 7.1 && ax <= 0.6) || (s >= 7.1 && s <= 12.0 && ax <= 0.8)) return "engine";
+  return null;
+}
+function partAtScreenPoint(screenX, screenY) {
+  const { worldX, worldY } = screenToWorld(screenX, screenY);
+  const { s, x } = worldToBodyFrame(worldX, worldY);
+  return hitTestPart(s, x);
+}
+
+// ---- panel state + rendering ----
+const partPanelEl = document.getElementById("partPanel");
+const panelTitleEl = partPanelEl.querySelector(".panel-title");
+const panelBodyEl = partPanelEl.querySelector(".panel-body");
+const enginePreviewEl = document.getElementById("enginePreview");
+const engineListEl = document.getElementById("engineList");
+const engineApplyBtn = document.getElementById("engineApplyBtn");
+const panelCloseBtn = partPanelEl.querySelector(".panel-close");
+
+let openPart = null;
+let currentEngineId = "ENG-K1"; // matches RSX.testVehicle.build()'s hardcoded engine
+let selectedEngineId = "ENG-K1";
+
+function closePanel() {
+  openPart = null;
+  partPanelEl.hidden = true;
+  partPanelEl.removeAttribute("data-part");
+  canvas.style.cursor = "default";
+}
+
+function positionSimplePanel(viewportX, viewportY) {
+  const margin = 12, w = 320, estH = 240; // rough card footprint, clamped to the viewport
+  let left = viewportX + 16, top = viewportY - 40;
+  if (left + w + margin > window.innerWidth) left = viewportX - w - 16;
+  if (left < margin) left = margin;
+  if (top + estH + margin > window.innerHeight) top = window.innerHeight - estH - margin;
+  if (top < margin) top = margin;
+  partPanelEl.style.left = left + "px";
+  partPanelEl.style.top = top + "px";
+}
+
+function openPanel(part, viewportX, viewportY) {
+  openPart = part;
+  partPanelEl.dataset.part = part;
+  partPanelEl.hidden = false;
+  if (part === "engine") {
+    panelTitleEl.textContent = PART_CONTENT.engine.title;
+    panelBodyEl.textContent = PART_CONTENT.engine.body;
+    partPanelEl.style.left = ""; partPanelEl.style.top = "";
+    selectedEngineId = currentEngineId;
+    renderEnginePanel();
+  } else {
+    const c = PART_CONTENT[part];
+    panelTitleEl.textContent = c.title;
+    panelBodyEl.textContent = c.body;
+    // #engineList / #enginePreview are only present/populated for data-part="engine"
+    // (testability contract) -- clear them rather than leaving stale (CSS-hidden)
+    // engine cards sitting in the DOM from a previous visit to the engine panel.
+    engineListEl.innerHTML = "";
+    enginePreviewEl.innerHTML = "";
+    delete enginePreviewEl.dataset.thrust; delete enginePreviewEl.dataset.isp;
+    delete enginePreviewEl.dataset.propMass; delete enginePreviewEl.dataset.twr;
+    positionSimplePanel(viewportX, viewportY);
+  }
+}
+
+const fmtInt = v => Math.round(v).toLocaleString("en-US");
+
+function engineSeparatedAtRealPa(eng, pa) {
+  const fuel = RSX.FUEL_PRESETS[eng.fuelKey].propellant;
+  const motor = { ...RSX.makeMotor({ cstar: fuel.cstar, k: fuel.k }, null,
+    { throatD: eng.throatD, exitD: eng.exitD, efficiency: 0.94 }), type: "liquid", pcDesign: eng.pcDesign };
+  return (motor.pcDesign > 0 && pa > 0) ? RSX.isSeparated(motor, motor.pcDesign, pa) : false;
+}
+
+function renderEnginePanel() {
+  engineListEl.innerHTML = "";
+  for (const eng of ENGINE_CATALOG) {
+    const content = ENGINE_CONTENT[eng.id];
+    const vac = previewEngine(eng, 1, 0); // vacuum reading: comparable across every catalog engine
+    const fuelName = RSX.FUEL_PRESETS[eng.fuelKey].name;
+    let slStat = "";
+    if (eng.hasSL) {
+      const sl = previewEngine(eng, 1, 101325);
+      slStat = `<div class="engine-stat-label">THRUST (SL)</div><div class="engine-stat-val">${fmtInt(sl.thrust / 1000)} kN</div>`;
+    }
+    const card = document.createElement("div");
+    card.className = "engine-card" + (eng.id === currentEngineId ? " is-current" : "") + (eng.id === selectedEngineId ? " is-selected" : "");
+    card.dataset.engineId = eng.id;
+    card.innerHTML = `
+      <div class="engine-card-head"><span class="engine-name">${eng.name}</span><span class="engine-id">${eng.id}</span></div>
+      <div class="engine-fuel-chip" style="--dot-color:${PROP_COLOR[eng.fuelKey]}">${fuelName}</div>
+      <p class="engine-tagline">${content.tagline}</p>
+      <div class="engine-stats">
+        <div class="engine-stat-label">DRY MASS</div><div class="engine-stat-val">${eng.dryMass} kg</div>
+        <div class="engine-stat-label">THRUST (VAC)</div><div class="engine-stat-val">${fmtInt(vac.thrust / 1000)} kN</div>
+        ${slStat}
+        <div class="engine-stat-label">ISP (VAC)</div><div class="engine-stat-val">${fmtInt(vac.isp)} s</div>
+        <div class="engine-stat-label">GIMBAL</div><div class="engine-stat-val">${eng.gimbalDeg}°</div>
+        <div class="engine-stat-label">MIN THROTTLE</div><div class="engine-stat-val">${eng.minThrottlePct}%</div>
+      </div>
+      <ul class="engine-pros">${content.pros.map(p => `<li>${p}</li>`).join("")}</ul>
+      <ul class="engine-cons">${content.cons.map(c => `<li>${c}</li>`).join("")}</ul>
+      <button type="button" class="engine-select-btn">${eng.id === selectedEngineId ? "PREVIEWING" : "PREVIEW THIS ENGINE"}</button>
+    `;
+    card.querySelector(".engine-select-btn").addEventListener("click", () => {
+      selectedEngineId = eng.id;
+      renderEnginePanel();
+    });
+    engineListEl.appendChild(card);
+  }
+  updateEnginePreview();
+}
+
+function updateEnginePreview() {
+  const currEng = engineById(currentEngineId);
+  const selEng = engineById(selectedEngineId);
+  // "SL" only when BOTH engines carry a rated sea-level target -- never
+  // fabricate a sea-level number a catalog entry doesn't have.
+  const bothSL = currEng.hasSL && selEng.hasSL;
+  const condPa = bothSL ? 101325 : 0;
+  const condLabel = bothSL ? "SL" : "VAC";
+  const currPrev = previewEngine(currEng, 1, condPa);
+  const selPrev = previewEngine(selEng, 1, condPa);
+
+  // Separately: is the SELECTED engine actually flow-separated right now,
+  // at the vehicle's REAL current ambient pressure (not the abstract
+  // SL/VAC comparison pressure above) -- a live contextual warning.
+  const altNow = Math.max(Math.hypot(S.rx, S.ry) - planet.R, 0);
+  const paNow = RSX.atmosphere(altNow, planet).P;
+  const sepNow = engineSeparatedAtRealPa(selEng, paNow);
+
+  const pct = (a, b) => (a !== 0 ? ((b - a) / a) * 100 : (b === 0 ? 0 : Infinity));
+  const fmtPct = v => (Number.isFinite(v) ? (v >= 0 ? "+" : "") + v.toFixed(0) + "%" : "—");
+  const rowClass = (improved, critical) => (critical ? "critical" : (improved ? "nominal" : "info"));
+  const twrCritical = selPrev.twr < 1.0;
+
+  enginePreviewEl.innerHTML = `
+    <div class="outcome-row">
+      <span class="outcome-label">THRUST (${condLabel})</span>
+      <span class="outcome-values">${fmtInt(currPrev.thrust / 1000)} kN &rarr; ${fmtInt(selPrev.thrust / 1000)} kN${sepNow ? '<span class="outcome-sep-tag">SEP &times;0.85</span>' : ""}</span>
+      <span class="outcome-delta ${rowClass(selPrev.thrust > currPrev.thrust, false)}">${fmtPct(pct(currPrev.thrust, selPrev.thrust))}</span>
+    </div>
+    <div class="outcome-row">
+      <span class="outcome-label">ISP (${condLabel})</span>
+      <span class="outcome-values">${fmtInt(currPrev.isp)} s &rarr; ${fmtInt(selPrev.isp)} s</span>
+      <span class="outcome-delta ${rowClass(selPrev.isp > currPrev.isp, false)}">${fmtPct(pct(currPrev.isp, selPrev.isp))}</span>
+    </div>
+    <div class="outcome-row">
+      <span class="outcome-label">PROP MASS</span>
+      <span class="outcome-values">${fmtInt(currPrev.newPropMassFull)} kg &rarr; ${fmtInt(selPrev.newPropMassFull)} kg</span>
+      <span class="outcome-delta info">${fmtPct(pct(currPrev.newPropMassFull, selPrev.newPropMassFull))}</span>
+    </div>
+    <div class="outcome-row">
+      <span class="outcome-label">TWR${twrCritical ? ' <strong style="color:var(--stat-critical)">CANNOT LIFT OFF</strong>' : ""}</span>
+      <span class="outcome-values">${currPrev.twr.toFixed(2)} &rarr; ${selPrev.twr.toFixed(2)}</span>
+      <span class="outcome-delta ${rowClass(selPrev.twr > currPrev.twr, twrCritical)}">${fmtPct(pct(currPrev.twr, selPrev.twr))}</span>
+    </div>
+  `;
+  enginePreviewEl.dataset.thrust = selPrev.thrust.toFixed(1);
+  enginePreviewEl.dataset.isp = selPrev.isp.toFixed(1);
+  enginePreviewEl.dataset.propMass = selPrev.newPropMassFull.toFixed(1);
+  enginePreviewEl.dataset.twr = selPrev.twr.toFixed(3);
+
+  engineApplyBtn.disabled = selectedEngineId === currentEngineId;
+  engineApplyBtn.textContent = selectedEngineId === currentEngineId ? "CURRENTLY MOUNTED" : `APPLY ${selEng.name.toUpperCase()}`;
+}
+
+engineApplyBtn.addEventListener("click", () => {
+  const selEng = engineById(selectedEngineId);
+  if (!selEng || selectedEngineId === currentEngineId) return;
+  applyEngine(selEng);
+  currentEngineId = selectedEngineId;
+  renderEnginePanel(); // rebuild so the persistent is-current outline + Apply state follow the swap
+});
+panelCloseBtn.addEventListener("click", closePanel);
+// Clicks inside the panel must not fall through to the canvas's own click
+// handler below (which would immediately re-hit-test and close/reopen it).
+partPanelEl.addEventListener("click", e => e.stopPropagation());
+
+canvas.addEventListener("click", e => {
+  const rect = canvas.getBoundingClientRect();
+  const screenX = e.clientX - rect.left, screenY = e.clientY - rect.top;
+  const part = partAtScreenPoint(screenX, screenY);
+  if (part && part === openPart) { closePanel(); return; }
+  if (part) openPanel(part, e.clientX, e.clientY);
+  else closePanel();
+});
+// Hover affordance (nice-to-have, not required): pointer cursor over a clickable part.
+canvas.addEventListener("mousemove", e => {
+  const rect = canvas.getBoundingClientRect();
+  const screenX = e.clientX - rect.left, screenY = e.clientY - rect.top;
+  canvas.style.cursor = partAtScreenPoint(screenX, screenY) ? "pointer" : "default";
+});
+window.addEventListener("keydown", e => {
+  if (e.code === "Escape" && openPart) closePanel();
 });
 
 draw(0, 0);
@@ -326,25 +1243,100 @@ requestAnimationFrame(frame);
 
 // debug hook for screenshot-based QA independent of rAF:
 window.RSXTick = function (dtWall, throttle) {
-  if (throttle != null) { ctrl.throttle = throttle; if (throttle > 0 && ignitionT == null) ignitionT = simTime; }
   simTime += dtWall;
+  if (missionPhase === "coast") {
+    updateCoast(dtWall);
+    draw(simTime, dtWall);
+    return { crashed, crashMsg, missionPhase, coastRemainingM, alt: null, th: S.th, om: S.om };
+  }
+  if (throttle != null) { ctrl.throttle = throttle; if (throttle > 0 && ignitionT == null) ignitionT = simTime; }
+  // Only a REAL (throttle==null, "let internal state evolve naturally")
+  // tick goes through the countdown/ramp -- an explicit override keeps
+  // instantly setting ctrl.throttle above, unchanged, so automated QA
+  // doesn't have to sit through a realistic countdown every time.
+  if (throttle == null) { updateMarsEscapeCheck(); updateIgnitionSequence(simTime, dtWall); }
   stepPhysics(dtWall);
   spawnPadSmoke(dtWall);
   RSX.render.updateParticles(particles, dtWall);
   draw(simTime, dtWall);
-  return { crashed, crashMsg, alt: Math.hypot(S.rx, S.ry) - planet.R, th: S.th, om: S.om };
+  return { crashed, crashMsg, missionPhase, alt: Math.hypot(S.rx, S.ry) - planet.R, th: S.th, om: S.om };
 };
+window.RSXCommitToMars = function () { commitToMarsTransfer(); }; // test/debug hook, mirrors KeyM
 window.RSXSetState = function (alt, v, throttle) {
+  if (missionPhase === "coast") missionPhase = planet.id === "mars" ? "mars" : "home"; // a debug teleport should never leave the coast screen stuck rendering
+  canCommitToMars = false;
   crashed = false; crashMsg = "";
   S.ry = planet.R + alt; S.rx = 0;
   S.vy = v; S.vx = -planet.wp * S.ry;
   S.th = Math.PI / 2; S.om = 0;
   ctrl.throttle = throttle; ctrl.thetaCmd = Math.PI / 2; ctrl.gimbal = 0;
-  if (throttle > 0 && ignitionT == null) ignitionT = simTime - 0.5;
+  commandedThrottle = throttle; // keep in sync with the throttle just applied above -- else a live Space/Z after this teleport could snap ctrl.throttle to a stale commandedThrottle instead of continuing from what this call configured
+  if (throttle > 0 && ignitionT == null) { ignitionT = simTime - 0.5; rampComplete = true; } // this call is what lit the engine -- treat it as already past the startup ramp, same as a naturally-completed one
+  countdownStart = null; // teleporting to a state shouldn't leave a stale countdown fighting the throttle just set above
   cache.valid = false;
   veh.mp = RSX.massProps(veh.parts);
   draw(simTime, 0.016);
 };
+
+// ---- persistent propellant-comparison panel --------------------------
+// Reference values are real-world illustrative figures (typical flown
+// engines/motors), NOT this game's simplified nozzle model -- rp1/ch4/lh2/
+// solid are also simulated in-flight (RSX.FUEL_PRESETS), and whichever one
+// is currently loaded is highlighted here with its LIVE computed Isp
+// overlaid, so the static reference and the actual flight data sit side by
+// side. Hypergolic has no in-game engine (no flyable NTO/MMH hardware in
+// the 4-part catalog) -- it's reference-only, included because the brief
+// specifically asks why it persists despite unremarkable Isp.
+const PROP_REFERENCE = [
+  { key: "lh2", label: "LH₂ / LOX", dot: "var(--prop-lh2)", ispVac: 452, density: 360,
+    note: "Highest Isp here, but a bulky, cryogenic (-253°C) low-density propellant with real boil-off losses." },
+  { key: "ch4", label: "CH₄ / LOX (Methalox)", dot: "var(--prop-ch4)", ispVac: 380, density: 830,
+    note: "The middle ground: cleaner-burning than RP-1 (less coking, easier reuse) and ISRU-friendly for Mars." },
+  { key: "rp1", label: "RP-1 / LOX (Kerolox)", dot: "var(--prop-rp1)", ispVac: 348, density: 1030,
+    note: "Storable at room temperature, dense, decades of flight history -- still the default first-stage choice." },
+  { key: "hyp", label: "NTO / MMH (Hypergolic)", dot: "#B0559E", ispVac: 320, density: 1200,
+    note: "Ignites on contact -- no ignition system to fail. Storable for years. Toxic and corrosive to handle." },
+  { key: "solid", label: "APCP (Solid)", dot: "var(--prop-solid)", ispVac: 285, density: 1770,
+    note: "Simplest and cheapest, highest thrust density. Cannot be throttled, shut down, or restarted." },
+];
+const ISP_SCALE = 470, DENS_SCALE = 1850;
+
+function liveIspNow() {
+  // Full-throttle vacuum Isp of whatever's actually mounted right now --
+  // Isp = Cf*c*/g0 is independent of Pc, so this is a fair "as flown" value
+  // regardless of current throttle/altitude.
+  const pcFull = veh.motor.pcDesign;
+  const thrust = RSX.thrustN(veh.motor, pcFull, 0);
+  const mdot = RSX.massFlow(veh.motor, pcFull);
+  return mdot > 0 ? thrust / (mdot * RSX.GRAVITY_REF) : 0;
+}
+
+function propBarRow(label, dotColor, value, scale, isLive, unit) {
+  const pct = RSX.clamp((value / scale) * 100, 0, 100);
+  return `<div class="prop-row${isLive ? " is-live" : ""}" style="--dot-color:${dotColor}">
+    <div class="prop-row-head">
+      <span class="prop-row-label">${label}</span>
+      <span class="prop-row-val">${Math.round(value)}${unit}</span>
+    </div>
+    <div class="prop-bar-track"><div class="prop-bar-fill" style="width:${pct}%"></div></div>
+  </div>`;
+}
+
+function renderPropPanel() {
+  const liveKey = veh.propKey;
+  const liveIsp = liveIspNow();
+  document.getElementById("ispChart").innerHTML = PROP_REFERENCE.map(p => {
+    const isLive = p.key === liveKey;
+    const val = isLive ? liveIsp : p.ispVac;
+    return propBarRow(p.label + (isLive ? " (live)" : ""), p.dot, val, ISP_SCALE, isLive, "s")
+      + (isLive ? "" : `<div class="prop-note">${p.note}</div>`);
+  }).join("");
+  document.getElementById("densChart").innerHTML = PROP_REFERENCE.map(p =>
+    propBarRow(p.label, p.dot, p.density, DENS_SCALE, p.key === liveKey, "")
+  ).join("");
+}
+renderPropPanel();
+setInterval(renderPropPanel, 400); // cheap DOM writes, decoupled from the render loop on purpose
 </script>
 </body>
 </html>
