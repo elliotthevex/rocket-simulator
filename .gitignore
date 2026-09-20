@@ -10,3 +10,4 @@ venv/
 *.png
 *.csv
 .vscode/settings.json
+.claude/
