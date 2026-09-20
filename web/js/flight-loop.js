@@ -62,12 +62,23 @@ RSX.testVehicle.build = function () {
   return veh;
 };
 
+// Propellant remaining in the vehicle's single tank. Thrust and mass flow
+// are gated on this: an empty tank means flameout, so the engine cannot keep
+// pushing a dry vehicle (a fuel-depletion cut-off is required by
+// design/requirements.md R-75 and was previously missing -- the sim kept
+// accelerating at full thrust after burnout with the mass pinned at dry).
+RSX.testVehicle.propAvailable = function (veh) {
+  const tank = veh.parts.find(p => p.name === "tank");
+  return tank ? Math.max(0, tank.propMass) : 0;
+};
 RSX.testVehicle.thrustNow = function (veh, pa, throttle) {
+  if (RSX.testVehicle.propAvailable(veh) <= 0) return 0;
   const t = RSX.clamp(throttle, 0, 1);
   const pc = veh.motor.pcDesign * t;
   return pc > 0 ? RSX.thrustN(veh.motor, pc, pa) : 0;
 };
 RSX.testVehicle.mdotNow = function (veh, pa, throttle) {
+  if (RSX.testVehicle.propAvailable(veh) <= 0) return 0;
   const t = RSX.clamp(throttle, 0, 1);
   const pc = veh.motor.pcDesign * t;
   return pc > 0 ? RSX.massFlow(veh.motor, pc) : 0;
