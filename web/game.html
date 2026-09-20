@@ -218,6 +218,7 @@
 <script src="js/physics-core.js"></script>
 <script src="js/renderer.js"></script>
 <script src="js/flight-loop.js"></script>
+<script src="js/control.js"></script>
 <script>
 "use strict";
 // let, not const: arriveAtMars() below reassigns this once the interplanetary
@@ -314,23 +315,12 @@ window.RSXDEBUG = {
 // liftoff and ring at burnout. This divides that gain out, then inverts the
 // gimbal torque relation tau = -l_e*T*sin(delta) to get the deflection, and
 // slew-limits toward it the way a real gimbal actuator would.
-const CTRL_WN = 1.2, CTRL_ZETA = 0.8, GIMBAL_MAX = 0.35, GIMBAL_RATE = 0.9; // rad, rad/s
-function gimbalControl(dt, pa) {
-  const MP = veh.mp;
-  const ell = veh.sEngine - MP.s_cm;
-  const T = ctrl.throttle > 0 ? veh.thrustNow(pa, ctrl.throttle) : 0;
-  const eTh = RSX.wrapPi(ctrl.thetaCmd - S.th);
-  let dCmd = 0;
-  if (Math.abs(eTh) >= 0.0035) {
-    const tauDes = MP.I * (CTRL_WN * CTRL_WN * eTh - 2 * CTRL_ZETA * CTRL_WN * S.om);
-    const auth = ell * T;
-    if (auth > 1e-3) {
-      const sinD = RSX.clamp(-tauDes / auth, -1, 1);
-      dCmd = RSX.clamp(Math.asin(sinD), -GIMBAL_MAX, GIMBAL_MAX);
-    }
-  }
-  const dMax = GIMBAL_RATE * dt;
-  ctrl.gimbal += RSX.clamp(dCmd - ctrl.gimbal, -dMax, dMax);
+// The control law itself lives in js/control.js (RSX.control) so it can be
+// tested headlessly; this wrapper feeds it the substep's derivative peek.
+// `A` is the deriv() output for the current state (the stepPhysics peek).
+let lastGimbalCmd = null; // {dCmd, wn, tauAero, sigma, SM, saturated} for the HUD/debug
+function gimbalControl(dt, A) {
+  lastGimbalCmd = RSX.control.stepGimbal(S, veh, ctrl, A, dt);
 }
 
 function resetToPad() {
@@ -515,7 +505,7 @@ function stepPhysics(dtWall) {
     const peek = cache.valid ? cache.d : RSX.deriv(S, veh, ctrl, planet, cache.tmpA);
     let dt = RSX.chooseDt(S, veh, peek, planet, remaining);
     const alt0 = Math.hypot(S.rx, S.ry) - planet.R;
-    gimbalControl(dt, RSX.atmosphere(Math.max(alt0, 0), planet).P);
+    gimbalControl(dt, peek);
     const snap = { rx: S.rx, ry: S.ry, vx: S.vx, vy: S.vy, th: S.th, om: S.om, t: S.t };
     RSX.stepVerlet(S, veh, ctrl, planet, dt, cache);
     if (!Number.isFinite(S.rx) || !Number.isFinite(S.ry) || !Number.isFinite(S.vx) ||
