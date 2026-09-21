@@ -18,12 +18,7 @@ RSX.rocket.validate = function (design, veh, stats) {
   const checks = [];
   const add = (id, ok, label, detail) => checks.push({ id, ok, label, detail: detail || "" });
 
-  // The catalog has no `cls`/category field yet (design/build-plan.md's
-  // fuller schema is deferred until a real builder needs it) -- id prefix
-  // is an honest stand-in for "is this a command module" while the only
-  // command part is pod.probe, and is flagged here so it is not mistaken
-  // for the real thing once more part categories exist.
-  const hasCommandPart = design.stack.some((id) => id.startsWith("pod."));
+  const hasCommandPart = design.stack.some((id) => RSX.PARTS.get(id).cls === "pod");
   add("command", hasCommandPart, "Command module", hasCommandPart ? "present" : "no pod.* part in the stack");
 
   let engineOk = false, tankOk = false, feedOk = false;

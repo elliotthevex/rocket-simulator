@@ -9,7 +9,8 @@ status=0
 for f in "$ROOT"/tests/js/test-*.js; do
   case "$(basename "$f")" in *"$FILTER"*) ;; *) continue ;; esac
   echo "== $(basename "$f")"
-  out=$("$JSC" "$ROOT/web/js/physics-core.js" "$ROOT/web/js/flight-loop.js" "$ROOT/web/js/physics/control.js" \
+  out=$("$JSC" "$ROOT/web/js/physics-core.js" "$ROOT/web/js/renderer.js" "$ROOT/web/js/render/part-portrait.js" \
+        "$ROOT/web/js/flight-loop.js" "$ROOT/web/js/physics/control.js" \
         "$ROOT/web/js/parts/catalog.js" "$ROOT/web/js/rocket/vehicle.js" "$ROOT/web/js/rocket/stats.js" \
         "$ROOT/web/js/rocket/validate.js" "$ROOT/tests/js/harness.js" "$f" \
         -e "runAllTests('$(basename "$f")')" 2>&1)

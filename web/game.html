@@ -316,6 +316,7 @@
 </div>
 <script src="js/physics-core.js"></script>
 <script src="js/renderer.js"></script>
+<script src="js/render/part-portrait.js"></script>
 <script src="js/flight-loop.js"></script>
 <script src="js/physics/control.js"></script>
 <script src="js/parts/catalog.js"></script>
@@ -381,12 +382,7 @@ document.getElementById("btnBackToBuilder").addEventListener("click", () => loca
    ===================================================================== */
 
 function categoryOf(def) {
-  if (def.id.startsWith("nose.")) return "nose";
-  if (def.id.startsWith("pod.")) return "pod";
-  if (def.tank) return "tank";
-  if (def.engine) return "engine";
-  if (def.fin) return "fin";
-  return "other";
+  return def.cls; // authoritative now (web/js/parts/catalog.js); was prefix/role-guessed before def.cls existed
 }
 
 const byCategory = { nose: [], pod: [], tank: [], engine: [], fin: [] };
