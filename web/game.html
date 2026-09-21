@@ -197,10 +197,23 @@
 
 /* ---- Rocket Builder screen (merged from the former web/builder.html) ---- */
   :root {
-    --bg: #12161a; --panel: #181d22; --card: #1e242b; --card-hover: #262e37;
-    --ink: #e7edf2; --ink-dim: #8d9aa6; --border: #2c343c;
-    --accent: #e0973a; --accent-ink: #241000;
+    --bg: #12161a; --panel: #181d22; --card-hover: #262e37;
+    --ink: #e7edf2; --ink-dim: #8d9aa6;
     --ok: #3fb87f; --warn: #e0973a; --bad: #e0554a;
+  }
+  /* --card/--border/--accent/--accent-ink are scoped to #screen-build, not
+     :root: the flight screen (game.html's ORIGINAL tokens, defined above
+     in the first :root block, lines ~15-33) already defines these same
+     names with different values for its own panels (#partPanel/#propPanel).
+     Two :root rules for the same custom property collide -- CSS resolves
+     it by document order, so this block (added later, when builder.html
+     was merged in) was silently overriding the flight screen's palette
+     sitewide. Scoping to #screen-build keeps each screen's tokens visible
+     only to its own descendants (#screen-flight is a SIBLING, not a
+     descendant, so it never sees these) -- same names, no collision. */
+  #screen-build {
+    --card: #1e242b; --border: #2c343c;
+    --accent: #e0973a; --accent-ink: #241000;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
@@ -217,11 +230,20 @@
   .slot { margin-bottom: 18px; }
   .slot h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-dim); margin-bottom: 6px; }
   .part-card { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px;
-    margin-bottom: 6px; cursor: pointer; transition: background 0.1s; }
+    margin-bottom: 6px; cursor: pointer; transition: background 0.1s; position: relative;
+    display: flex; align-items: center; gap: 8px; }
   .part-card:hover { background: var(--card-hover); }
   .part-card.selected { border-color: var(--accent); background: rgba(224,151,58,0.12); }
   .part-card .pname { font-weight: 600; }
   .part-card .pmeta { color: var(--ink-dim); font-size: 12px; margin-top: 2px; }
+  .part-thumb { flex: none; width: 44px; height: 44px; border-radius: 3px; background: rgba(0,0,0,0.2); }
+  .part-card .pcol { flex: 1 1 auto; min-width: 0; }
+  .info-btn {
+    flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--card-hover); color: var(--ink-dim); font: 11px/18px 'IBM Plex Mono', monospace;
+    text-align: center; cursor: pointer;
+  }
+  .info-btn:hover { color: var(--accent); border-color: var(--accent); }
   .fin-toggle { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--border);
     border-radius: 4px; padding: 8px 10px; cursor: pointer; }
   .fin-toggle.on { border-color: var(--accent); background: rgba(224,151,58,0.12); }
