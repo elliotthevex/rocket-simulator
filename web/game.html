@@ -248,6 +248,13 @@
   button.primary:hover { filter: brightness(1.08); }
   #checkResult { margin-left: auto; font-size: 12px; color: var(--ink-dim); }
   #checklistModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
+  /* An ID selector setting `display` beats the browser's own `[hidden] {
+     display: none }` rule (higher specificity), so #checklistModal above
+     was ALWAYS covering the full viewport -- position:fixed, inset:0 --
+     regardless of its `hidden` attribute, silently swallowing every click
+     on the page underneath it. This selector's specificity (id+attribute)
+     beats the plain id rule above and restores `hidden` -> display:none. */
+  #checklistModal[hidden] { display: none; }
   #checklistModal .box { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 420px; max-width: 92vw; }
   .check-line { display: flex; gap: 8px; padding: 5px 0; align-items: flex-start; }
   .check-line .mark { width: 16px; flex: none; }
