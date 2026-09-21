@@ -213,7 +213,7 @@
      sitewide. Scoping keeps each screen family's tokens visible only to
      its own descendants (#screen-flight is a SIBLING of both, not a
      descendant, so it never sees these) -- same names, no collision. */
-  #screen-build, #screen-assembly, #checklistModal, #partDetailModal {
+  #screen-build, #screen-assembly, #checklistModal, #partDetailModal, #controlsModal, #toastStack {
     --card: #1e242b; --border: #2c343c;
     --accent: #e0973a; --accent-ink: #241000;
   }
@@ -236,6 +236,18 @@
 
   #screen-assembly { display: flex; flex-direction: column; height: 100%; }
   .assembly-body { flex: 1; position: relative; background: #05070a; }
+  /* Without an explicit CSS size, a <canvas> falls back to its own
+     width/height ATTRIBUTES for layout -- and assembly-3d.js's resize()
+     reads canvas.clientWidth/clientHeight to size the WebGL renderer,
+     then sets those same attributes (scaled by devicePixelRatio) via
+     renderer.setSize(w, h, false) (updateStyle:false, so it never
+     touches CSS). With no CSS override, that attribute write becomes
+     next resize()'s input size too -- a runaway feedback loop that
+     doubled the canvas's effective size on every call (300 -> 600 ->
+     1200 -> 2400px), visibly cutting the rocket off-centre after a few
+     screen switches. This rule breaks the loop: the canvas always fills
+     its container regardless of its own attributes. */
+  #assembly3d { width: 100%; height: 100%; }
   .assembly-camera-bar {
     position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 5;
     display: flex; gap: 6px; background: rgba(15,18,22,0.7); padding: 6px; border-radius: 6px;
@@ -347,6 +359,49 @@
   #partDetailModal .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
   #partDetailModal .sim-value-note { font-size: 10.5px; color: var(--ink-dim); font-style: italic; margin: -8px 0 14px; }
 
+  /* ---- toast feedback (spec §12: never change something silently) ---- */
+  #toastStack {
+    position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 90;
+    display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none;
+  }
+  .toast {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 5px;
+    background: var(--panel); border: 1px solid var(--border); color: var(--ink);
+    font-size: 12.5px; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    opacity: 0; transform: translateY(-6px); transition: opacity 180ms ease, transform 180ms ease;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast .mark { font-weight: 700; }
+  .toast.success .mark { color: var(--ok); }
+  .toast.warning .mark { color: var(--warn); }
+  .toast.info .mark { color: var(--accent); }
+
+  /* ---- self-explanatory nav tabs: name + one-line purpose (spec §3/§13) ---- */
+  .mode-tabs button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 14px; }
+  .mode-tabs button .tab-name { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .mode-tabs button .tab-desc { font-size: 9.5px; font-weight: 500; letter-spacing: 0.01em; text-transform: none; opacity: 0.75; }
+  .mode-tabs button.active .tab-desc { opacity: 0.9; }
+
+  /* ---- camera bar: name + purpose, not a bare icon (spec §3/§16) ---- */
+  .assembly-camera-bar button { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 76px; }
+  .assembly-camera-bar button .cam-name { font-size: 11px; font-weight: 700; }
+  .assembly-camera-bar button .cam-desc { font-size: 8.5px; font-weight: 500; text-transform: none; letter-spacing: 0; opacity: 0.65; }
+
+  #btnControls {
+    position: absolute; top: 12px; right: 12px; z-index: 5;
+    padding: 6px 12px; border-radius: 4px; border: 1px solid var(--border); background: rgba(15,18,22,0.7);
+    color: var(--ink); font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; cursor: pointer;
+  }
+  #btnControls:hover { background: var(--card-hover); }
+  #controlsModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 80; }
+  #controlsModal[hidden] { display: none; }
+  #controlsModal .box { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 380px; max-width: 92vw; }
+  #controlsModal .ctl-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; }
+  #controlsModal .ctl-row .k { color: var(--ink-dim); }
+  #controlsModal h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin: 14px 0 4px; }
+  #controlsModal h3:first-child { margin-top: 0; }
+
 /* ---- flight-screen "back to builder" affordance ---- */
 #btnBackToBuilder {
   position: fixed; left: 12px; bottom: 12px; z-index: 60;
@@ -361,11 +416,11 @@
 <div id="screen-build">
 <div id="app">
   <header>
-    <h1>ROCKET BUILDER</h1>
+    <h1>ROCKET DESIGN</h1>
     <span class="sub">Pick a nose, command module, tank and engine. Every number on the right comes from the real flight physics -- nothing here is invented.</span>
     <nav class="mode-tabs" data-mode-tabs>
-      <button type="button" data-screen="build">Design</button>
-      <button type="button" data-screen="assembly">Assembly</button>
+      <button type="button" data-screen="build"><span class="tab-name">Design</span><span class="tab-desc">Pick your parts</span></button>
+      <button type="button" data-screen="assembly"><span class="tab-name">Assembly</span><span class="tab-desc">See it in 3D</span></button>
     </nav>
   </header>
   <div class="columns">
@@ -382,22 +437,23 @@
 </div>
 <div id="screen-assembly" hidden>
   <header>
-    <h1>ROCKET BUILDER</h1>
-    <span class="sub">Drag to orbit, scroll to zoom. Click a part for its full spec sheet -- the same panel Design uses.</span>
+    <h1>ROCKET ASSEMBLY</h1>
+    <span class="sub">Drag to rotate, scroll to zoom, click a part to inspect it up close.</span>
     <nav class="mode-tabs" data-mode-tabs>
-      <button type="button" data-screen="build">Design</button>
-      <button type="button" data-screen="assembly">Assembly</button>
+      <button type="button" data-screen="build"><span class="tab-name">Design</span><span class="tab-desc">Pick your parts</span></button>
+      <button type="button" data-screen="assembly"><span class="tab-name">Assembly</span><span class="tab-desc">See it in 3D</span></button>
     </nav>
   </header>
   <div class="assembly-body">
     <canvas id="assembly3d"></canvas>
     <div class="assembly-hint" id="assemblyCheckResult"></div>
+    <button id="btnControls" type="button" title="Camera and selection controls">? Controls</button>
     <div class="assembly-camera-bar">
-      <button type="button" data-cam="top">Top</button>
-      <button type="button" data-cam="side">Side</button>
-      <button type="button" data-cam="front">Front</button>
-      <button type="button" data-cam="iso">Isometric</button>
-      <button type="button" data-cam="reset">Reset camera</button>
+      <button type="button" data-cam="top" title="Look straight down at the rocket"><span class="cam-name">Top</span><span class="cam-desc">Look from above</span></button>
+      <button type="button" data-cam="side" title="Look at the rocket from the side"><span class="cam-name">Side</span><span class="cam-desc">Profile view</span></button>
+      <button type="button" data-cam="front" title="Look at the rocket head-on"><span class="cam-name">Front</span><span class="cam-desc">Head-on view</span></button>
+      <button type="button" data-cam="iso" title="A 3/4 angled view, good for seeing the whole rocket"><span class="cam-name">Isometric</span><span class="cam-desc">Angled 3/4 view</span></button>
+      <button type="button" data-cam="reset" title="Return the camera to the default view"><span class="cam-name">Reset</span><span class="cam-desc">Back to default</span></button>
     </div>
   </div>
   <footer>
@@ -408,6 +464,8 @@
 </div>
 <div id="checklistModal" hidden></div>
 <div id="partDetailModal" hidden></div>
+<div id="controlsModal" hidden></div>
+<div id="toastStack" aria-live="polite"></div>
 <div id="screen-flight" hidden>
 <canvas id="cMain"></canvas>
 <div id="hud"></div>
@@ -610,7 +668,9 @@ function renderPalette() {
   paintThumbnails(el);
   el.querySelectorAll(".part-card").forEach((card) => {
     card.addEventListener("click", () => {
+      if (selection[card.dataset.slot] === card.dataset.id) return; // re-clicking the already-selected part is a no-op, not a re-add
       selection[card.dataset.slot] = card.dataset.id;
+      showToast(RSX.PARTS.get(card.dataset.id).name + " selected", "success");
       renderAll();
     });
   });
@@ -623,6 +683,7 @@ function renderPalette() {
   document.getElementById("finToggle").addEventListener("click", (e) => {
     if (e.target.closest(".info-btn")) return; // the info button's own listener (above) already handled this click
     selection.fins = !selection.fins;
+    showToast(selection.fins ? "Fins added" : "Fins removed", selection.fins ? "success" : "warning");
     renderAll();
   });
 }
@@ -733,16 +794,26 @@ function showPartDetail(def) {
     detailSpecRows(def).map(([l, v]) => '<div class="stat-row"><span class="label">' + l + '</span><span class="val">' + v + '</span></div>').join("") +
     '</div>' +
     '<div class="modal-actions">' +
+    '<button id="btnDetailFocus" title="Jump to Assembly and look closely at this part in 3D">Focus in 3D</button>' +
     '<button id="btnDetailClose">Close</button>' +
     '<button id="btnDetailAdd" class="primary"' + (actionDisabled ? " disabled" : "") + '>' + actionLabel + '</button>' +
     '</div></div>';
   modal.hidden = false;
   paintThumbnails(modal);
   modal.querySelector("#btnDetailClose").addEventListener("click", () => { modal.hidden = true; });
+  // Spec §17 "FOCUS": works even from the Design screen -- switches to
+  // Assembly (initialising/rebuilding the 3D scene if this is the first
+  // visit) and glides the camera to the part, all in the SAME click.
+  modal.querySelector("#btnDetailFocus").addEventListener("click", () => {
+    modal.hidden = true;
+    showScreen("assembly");
+    RSX.assembly3d.focusOnPartId(def.id);
+  });
   if (!actionDisabled) {
     modal.querySelector("#btnDetailAdd").addEventListener("click", () => {
       if (def.cls === "fin") selection.fins = !selection.fins;
       else selection[slot] = def.id;
+      showToast(def.name + (def.cls === "fin" ? (selection.fins ? " added" : " removed") : " added"), "success");
       modal.hidden = true;
       renderAll();
     });
@@ -774,6 +845,21 @@ function renderAll() {
   if (typeof currentScreenName !== "undefined" && currentScreenName === "assembly" && RSX.assembly3d && RSX.assembly3d.isInitialized()) {
     RSX.assembly3d.rebuild(design);
   }
+}
+
+// ---- toast feedback (spec §12: "do not make changes silently") --------
+function showToast(message, kind) {
+  const stack = document.getElementById("toastStack");
+  const el = document.createElement("div");
+  el.className = "toast " + (kind || "info");
+  const mark = kind === "warning" ? "⚠" : kind === "success" ? "✓" : "ℹ";
+  el.innerHTML = '<span class="mark">' + mark + '</span><span>' + message + '</span>';
+  stack.appendChild(el);
+  requestAnimationFrame(() => el.classList.add("show")); // one frame so the CSS transition actually runs
+  setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 220); // matches the CSS transition duration below
+  }, 2600);
 }
 
 function showChecklist(result, onProceed) {
@@ -843,8 +929,44 @@ document.querySelectorAll(".assembly-camera-bar button").forEach((btn) => {
   btn.addEventListener("click", () => RSX.assembly3d.frameCamera(btn.dataset.cam));
 });
 
-showScreen("build");
-renderAll();
+// ---- CONTROLS help overlay (spec §18) ----------------------------------
+document.getElementById("btnControls").addEventListener("click", () => {
+  const modal = document.getElementById("controlsModal");
+  modal.innerHTML =
+    '<div class="box"><h2 style="margin-top:0;">CONTROLS</h2>' +
+    '<h3>3D Camera</h3>' +
+    '<div class="ctl-row"><span class="k">Left-click + drag</span><span>Rotate around the rocket</span></div>' +
+    '<div class="ctl-row"><span class="k">Right-click + drag</span><span>Pan the view</span></div>' +
+    '<div class="ctl-row"><span class="k">Scroll wheel</span><span>Zoom in / out</span></div>' +
+    '<h3>Selection</h3>' +
+    '<div class="ctl-row"><span class="k">Click a part</span><span>Select, highlight &amp; focus on it</span></div>' +
+    '<div class="ctl-row"><span class="k">Click empty space</span><span>Deselect</span></div>' +
+    '<div class="modal-actions"><button id="btnControlsClose" class="primary">Got it</button></div>' +
+    '</div>';
+  modal.hidden = false;
+  modal.querySelector("#btnControlsClose").addEventListener("click", () => { modal.hidden = true; });
+});
+
+// Assembly (the real 3D rocket) is the landing screen, not the 2D parts
+// list -- spec §15 "the rocket should be the primary visual element",
+// §1 "the main experience [should not] look like a flat 2D dashboard".
+//
+// showScreen("assembly") calls RSX.assembly3d.init(), but this classic
+// script runs synchronously WHILE the document is still parsing, and
+// <script type="module"> (js/render/assembly-3d.js, which attaches
+// assembly3d to RSX) is ALWAYS deferred until parsing finishes -- so
+// calling it here directly would throw on every page load, not just
+// find it missing on a first click. DOMContentLoaded fires only after
+// every module script has finished running, so it is the correct,
+// standard signal to wait for; RSX.assembly3d may already exist by the
+// time this line runs (fast module fetch), in which case there is no
+// need to wait at all.
+renderAll(); // the 2D Design screen has no such dependency; render it now regardless
+if (window.RSX && RSX.assembly3d) {
+  showScreen("assembly");
+} else {
+  document.addEventListener("DOMContentLoaded", () => showScreen("assembly"));
+}
 
 function initFlight(design) {
 

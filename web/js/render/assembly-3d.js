@@ -38,13 +38,16 @@ import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/exampl
 
 let scene, camera, renderer, controls, canvas, group;
 let raycaster, mouseNDC;
-let meshToDef = new Map();
+let meshInfo = new Map(); // mesh.id -> { def, part: {sMid, R, L} } -- part carries enough geometry for camera framing
 let currentLayout = null;
 let initialized = false;
+let selectedMeshes = []; // the 1+ meshes for the currently selected part (a fin set is 2 meshes, one logical part)
+let camAnim = null; // {t0, dur, fromPos, toPos, fromTarget, toTarget} or null when idle -- see animate()
 
 const CLASS_COLOR = {
   nose: 0xe7edf2, pod: 0x8fa3b0, tank: 0xc9d2d8, engine: 0x3b4248, fin: 0x6e7880,
 };
+const HIGHLIGHT_EMISSIVE = 0xe0973a; // matches --accent in game.html's dark token set, not a hardcoded coincidence
 
 function disposeGroup() {
   if (!group) return;
@@ -53,12 +56,16 @@ function disposeGroup() {
     if (obj.material) (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach((m) => m.dispose());
   });
   scene.remove(group);
-  meshToDef = new Map();
+  meshInfo = new Map();
+  selectedMeshes = [];
 }
 
 function meshForPart(part) {
   const color = CLASS_COLOR[part.cls] != null ? CLASS_COLOR[part.cls] : 0x888888;
-  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: part.cls === "engine" ? 0.7 : 0.25 });
+  const material = new THREE.MeshStandardMaterial({
+    color, roughness: 0.55, metalness: part.cls === "engine" ? 0.7 : 0.25,
+    emissive: 0x000000, emissiveIntensity: 0.6, // toggled by setSelected() below; 0 = no highlight
+  });
   let geo;
   if (part.cls === "nose") {
     geo = new THREE.ConeGeometry(part.R, part.L, 28);
@@ -77,7 +84,12 @@ function finMeshes(finOn) {
   const rootChord = (finOn.def.fin && finOn.def.fin.rootChord) || 1.0;
   const span = (finOn.def.fin && finOn.def.fin.span) || 0.9;
   const thickness = 0.03;
-  const material = new THREE.MeshStandardMaterial({ color: CLASS_COLOR.fin, roughness: 0.5, metalness: 0.3 });
+  // ONE shared material for both meshes: they are one logical part (the
+  // fin SET), so selecting/highlighting either must highlight both, which
+  // a shared material does for free (mutating it affects both meshes).
+  const material = new THREE.MeshStandardMaterial({
+    color: CLASS_COLOR.fin, roughness: 0.5, metalness: 0.3, emissive: 0x000000, emissiveIntensity: 0.6,
+  });
   const meshes = [];
   [1, -1].forEach((side) => {
     const geo = new THREE.BoxGeometry(thickness, rootChord, span);
@@ -88,6 +100,15 @@ function finMeshes(finOn) {
   return meshes;
 }
 
+/** setSelected(meshes): highlights `meshes` (1+ meshes, one logical part)
+ *  and un-highlights whatever was selected before. `meshes` may be []
+ *  to clear the selection with nothing new selected. */
+function setSelected(meshes) {
+  selectedMeshes.forEach((m) => m.material.emissive.setHex(0x000000));
+  selectedMeshes = meshes || [];
+  selectedMeshes.forEach((m) => m.material.emissive.setHex(HIGHLIGHT_EMISSIVE));
+}
+
 /** rebuild(design): clears and redraws the scene for the given design. */
 function rebuild(design) {
   disposeGroup();
@@ -95,22 +116,27 @@ function rebuild(design) {
   group = new THREE.Group();
   currentLayout.parts.forEach((part) => {
     const mesh = meshForPart(part);
-    meshToDef.set(mesh.id, part.def);
+    meshInfo.set(mesh.id, { def: part.def, part });
     group.add(mesh);
   });
   if (currentLayout.finOn) {
+    const finPart = { cls: "fin", sMid: currentLayout.finOn.sMid, R: currentLayout.finOn.R, L: 0.9 };
     finMeshes(currentLayout.finOn).forEach((mesh) => {
-      meshToDef.set(mesh.id, currentLayout.finOn.def);
+      meshInfo.set(mesh.id, { def: currentLayout.finOn.def, part: finPart });
       group.add(mesh);
     });
   }
   scene.add(group);
-  frameCamera("iso");
+  frameCamera("iso", { instant: true });
 }
 
-/** frameCamera(preset): TOP/SIDE/FRONT/ISOMETRIC/RESET (spec §16). */
-function frameCamera(preset) {
+/** frameCamera(preset): TOP/SIDE/FRONT/ISOMETRIC/RESET (spec §16). Glides
+ *  (spec §7 "smooth camera movement") rather than snapping, except on the
+ *  very first call per rebuild() (nothing to glide FROM yet meaningfully
+ *  -- an instant cut on load reads as normal, not jarring). */
+function frameCamera(preset, opts) {
   if (!currentLayout) return;
+  const instant = opts && opts.instant;
   const sMid = currentLayout.sMid;
   const dist = Math.max(currentLayout.sTail, currentLayout.maxR * 5) * 1.7 || 8;
   const target = new THREE.Vector3(0, -sMid, 0);
@@ -123,14 +149,56 @@ function frameCamera(preset) {
     case "iso":
     default: pos = new THREE.Vector3(dist * 0.62, -sMid + dist * 0.5, dist * 0.62); break;
   }
-  camera.position.copy(pos);
-  controls.target.copy(target);
-  controls.update();
+  if (instant) {
+    camAnim = null;
+    camera.position.copy(pos);
+    controls.target.copy(target);
+    controls.update();
+  } else {
+    animateCameraTo(target, pos, 700);
+  }
+}
+
+/** Smoothly moves the camera+orbit-target from wherever they are now to
+ *  (toTarget, toPos) over `dur` ms (ease-out cubic). Used by both the
+ *  camera preset buttons and focusOnMesh() below, so "snap instantly"
+ *  vs "glide" is one code path, not two. */
+function animateCameraTo(toTarget, toPos, dur) {
+  camAnim = {
+    t0: performance.now(), dur: dur == null ? 700 : dur,
+    fromPos: camera.position.clone(), toPos,
+    fromTarget: controls.target.clone(), toTarget,
+  };
+}
+
+/** focusOnMesh(part): glides the camera to frame `part` closely -- the
+ *  spec's "FOCUS" behaviour (§17): select a component, camera moves to
+ *  it. Keeps the camera's current VIEWING DIRECTION (so focusing doesn't
+ *  disorient the user by also spinning the view), just changes target +
+ *  distance to frame the part. */
+function focusOnMesh(part) {
+  const target = new THREE.Vector3(0, -part.sMid, 0);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  if (!isFinite(dir.x) || dir.lengthSq() < 1e-6) dir.set(0.62, 0.5, 0.62).normalize(); // degenerate only if camera sat exactly on the old target
+  const dist = Math.max(part.L, part.R * 4, 1.2) * 2.4;
+  animateCameraTo(target, target.clone().add(dir.multiplyScalar(dist)), 700);
 }
 
 function resize() {
   if (!initialized) return;
-  const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+  // Read the PARENT's size (.assembly-body), not the canvas's own
+  // clientWidth/clientHeight: renderer.setSize(w, h, false) below writes
+  // w/h back onto the canvas's width/height ATTRIBUTES (scaled by
+  // devicePixelRatio) without touching its CSS size. If the canvas is
+  // ever the thing measured, that write becomes the NEXT call's input --
+  // a runaway feedback loop that doubled the canvas's effective size on
+  // every resize() call (300 -> 600 -> 1200 -> 2400px) before game.html
+  // gave #assembly3d an explicit CSS width/height:100%. That CSS fix
+  // already breaks the loop; measuring the parent here is defence in
+  // depth against the same bug returning if that rule is ever removed.
+  const parent = canvas.parentElement;
+  const w = (parent ? parent.clientWidth : canvas.clientWidth) || 1;
+  const h = (parent ? parent.clientHeight : canvas.clientHeight) || 1;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   renderer.setPixelRatio(dpr);
   renderer.setSize(w, h, false);
@@ -144,14 +212,35 @@ function onClick(event) {
   mouseNDC.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(mouseNDC, camera);
   const hits = raycaster.intersectObjects(group ? group.children : [], false);
-  if (hits.length && typeof window.showPartDetail === "function") {
-    const def = meshToDef.get(hits[0].object.id);
-    if (def) window.showPartDetail(def);
-  }
+  if (!hits.length) { setSelected([]); return; } // clicked empty space: deselect, matching a real CAD viewport
+  const info = meshInfo.get(hits[0].object.id);
+  if (!info) return;
+  // A fin set is TWO meshes sharing one material (see finMeshes above) --
+  // highlight both, not just the one the ray happened to hit, so the
+  // whole logical component reads as selected (spec §1 "select a
+  // component and have it highlighted", not "half of it"). Compared by
+  // `.def` (the one object BOTH fin meshes' info literals actually
+  // share), not by the info wrapper itself -- each mesh gets its OWN
+  // {def, part} literal in meshInfo.set(), even when def/part are equal.
+  const siblingMeshes = [];
+  group.children.forEach((child) => {
+    const childInfo = meshInfo.get(child.id);
+    if (childInfo && childInfo.def === info.def) siblingMeshes.push(child);
+  });
+  setSelected(siblingMeshes);
+  focusOnMesh(info.part);
+  if (typeof window.showPartDetail === "function") window.showPartDetail(info.def);
 }
 
-function animate() {
+function animate(now) {
   requestAnimationFrame(animate);
+  if (camAnim) {
+    const t = Math.min((now - camAnim.t0) / camAnim.dur, 1);
+    const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic -- fast start, gentle settle
+    camera.position.lerpVectors(camAnim.fromPos, camAnim.toPos, eased);
+    controls.target.lerpVectors(camAnim.fromTarget, camAnim.toTarget, eased);
+    if (t >= 1) camAnim = null;
+  }
   controls.update(); // required every frame for OrbitControls' damping
   renderer.render(scene, camera);
 }
@@ -191,11 +280,29 @@ function init(canvasEl) {
   requestAnimationFrame(animate);
 }
 
+/** focusOnPartId(id): selects + glides the camera to the part with this
+ *  catalog id, if it is currently in the scene. Lets the 2D detail panel
+ *  (game.html) offer its own FOCUS button (spec §17) without duplicating
+ *  any camera math -- one implementation, callable from either screen. */
+function focusOnPartId(id) {
+  let match = null;
+  meshInfo.forEach((info, meshId) => { if (info.def.id === id) match = info; });
+  if (!match) return;
+  const siblingMeshes = [];
+  group.children.forEach((child) => {
+    const childInfo = meshInfo.get(child.id);
+    if (childInfo && childInfo.def === match.def) siblingMeshes.push(child);
+  });
+  setSelected(siblingMeshes);
+  focusOnMesh(match.part);
+}
+
 window.RSX = window.RSX || {};
 window.RSX.assembly3d = {
   init,
   rebuild,
   frameCamera,
+  focusOnPartId,
   resize,
   isInitialized: () => initialized,
 };
