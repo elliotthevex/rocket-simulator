@@ -406,3 +406,93 @@ verifiers), with the attribution line updated to
 baseline restated: Design-screen stats 5.61 t / 1.01 t / 4.60 t / 251.5 kN
 / 276.7 kN / TWR 4.57 / 283/311 s / 50.8 s / 5237 m/s / CoM 4.31 m / 0.86
 cal MARGINAL.
+
+## 12. Amendment (2026-09-22): reference-image visual bar + real per-vehicle architecture
+
+- This plan is amended, not replaced, by the "CRITICAL VISUAL UPGRADE" request
+  (reference: a real SLS launch photograph and an SLS cutaway infographic,
+  both used as DATA for the target level of realism/complexity, never
+  reproduced or copied -- no NASA logos, no infographic layout, no
+  photographic textures lifted from either reference; every asset in this
+  project stays original primitive-based geometry).
+- Raises the bar for L1/L2: a vehicle in the Library must be visually and
+  structurally distinguishable from every other vehicle -- not the same
+  stack recolored. This means (a) the per-family height/diameter targets
+  section 3 already sets, and (b) parallel boosters for the 4 vehicles that
+  really have them (Space Shuttle, SLS, SLS Block 1B, Falcon Heavy), which
+  the current serial-stack data model cannot represent as-is -- see 12.1.
+- Adds to L3's visualization-mode bar: INTERNAL (the X-RAY mode, exposing
+  schematic tank/feed-line geometry with labels, matching the cutaway-
+  infographic's layered style) and explicit ENGINEERING OVERLAYS (CoM, CoP,
+  thrust-vector arrow, velocity, altitude, active stage, propellant
+  remaining -- independently toggleable, off by default, each backed by a
+  REAL number already computed by `RSX.rocket.stats`/the flight loop, never
+  invented) and lightweight MEASUREMENT tools (a ruler between two clicked
+  world-space points, a diameter readout on a selected cylindrical part, a
+  reference grid) -- additions to L3, not a new slice.
+- Adds to L3's camera work: FOLLOW VEHICLE (locks the orbit target to a
+  moving vehicle, for L9), ENGINE CLOSE-UP / STAGE CLOSE-UP (named buttons
+  wrapping the existing `focusOnPartId`/`focusOnMesh`), LAUNCH PAD (frames
+  the vehicle next to the new launch-tower reference geometry, 12.2).
+  FREE/ORBIT already exist via OrbitControls.
+- Adds a LAUNCH PAD / scale-reference environment (12.2) to the Library's
+  INSPECT view and to Assembly: an ORIGINAL lattice-strut gantry mesh (not
+  a copy of any real tower's exact structure) plus a ground plane, sized so
+  the vehicle's real height (`specs.heightM`) reads as genuinely enormous
+  next to it -- the concrete fix for "the rocket floats like a small model."
+- States plainly: "digital twin" data binding (the new request's section 8)
+  is LARGELY ALREADY TRUE here -- `meshInfo` already maps every mesh back
+  to its real catalog def, `showPartDetail` already reads that same def,
+  and `RSX.rocket.stats` already computes every displayed number from the
+  real kernel. What's missing is not the data binding, it's (a) booster/
+  multi-architecture geometry (12.1) and (b) the cutaway/exploded/overlay
+  VIEWS onto that already-connected data (L3). No new data layer needed.
+
+### 12.1 Parallel boosters -- data model extension and an honest physics simplification
+
+The existing model (`stack` = one ordered column, `stagesOf` splitting it
+only at `decoupler` parts) is SERIAL-ONLY: it cannot represent two
+side-mounted boosters as independent bodies without a real multi-body
+rewrite of the flight kernel (`RSX.deriv`/`stepVerlet` integrate exactly
+one rigid body's state `S`). That rewrite is large and explicitly OUT OF
+SCOPE here -- true independent per-booster flight dynamics (each tumbling
+away separately post-jettison, its own aero/contact) is a future slice.
+
+What ships instead, scoped and stated honestly in the UI:
+- `design.boosters: [{ design: <small serial sub-stack: tank+engine+
+  optional fin>, mountOffsetR: metres, count: 2 }]` (optional, additive;
+  `normalizeDesign` defaults it to `[]`).
+- **Rendering**: `RSX.rocket.assemblyLayoutMulti(design)` composes the
+  core's `assemblyLayout` plus one booster layout per entry, translated to
+  `mountOffsetR` and mirrored at even angular spacing around the core --
+  pure data, jsc-testable, zero Three.js dependency, same pattern as
+  `assemblyLayout`. `assembly-3d.js` renders each booster's parts as an
+  additional mesh group at its offset.
+- **Physics (the simplification, labeled wherever booster stats show)**:
+  while attached (a scripted burn-time/fuel-exhaustion condition, not a
+  real per-body integration), boosters' combined dry+prop mass adds to
+  `massProps`, and their combined thrust/mdot adds to the core engine's
+  `thrustNow`/`mdotNow` -- an AGGREGATE contribution to one still-single-
+  body vehicle, not independently simulated bodies. Separation drops their
+  combined mass (generalizing `flight.js`'s existing single-stage drop, not
+  spawning a real second flyable body). A small "AGGREGATE MODEL" badge
+  next to any booster-related stat states this plainly -- the same honesty
+  pattern this project already uses for the flow-separation warning.
+  `tests/js/test-boosters.js`: mass adds correctly, thrust adds correctly
+  while attached, separation drops exactly the aggregate mass,
+  `assemblyLayoutMulti` never throws and falls back to the plain single
+  layout when `boosters` is empty.
+
+## 13. Updated slice order note
+
+L1 (Rocket Library) now explicitly includes `assemblyLayoutMulti` +
+booster rendering/physics (12.1) for the 4 vehicles that need it (Shuttle,
+SLS, SLS Block 1B, Falcon Heavy); the other 6 vehicles use the existing
+single-column scaled-stack mechanism from section 2.2/3 unchanged. L3
+gains the overlay/measurement/camera-mode additions from section 12; its
+acceptance criteria gain: engineering overlays show real numbers matching
+the stats panel exactly (live JS check), the measurement ruler reports a
+distance matching the real world-space geometry to within rendering
+precision, and a booster vehicle's aggregate-mass/thrust badge is visible
+with separation dropping exactly the documented mass (jsc test + live
+check).
