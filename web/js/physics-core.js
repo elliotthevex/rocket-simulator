@@ -265,9 +265,22 @@ RSX.thrustCoefficient = function (motor, pc, pa) {
   let pe = RSX.peIdeal(motor, pc);
   let penalty = 1.0;
   if (RSX.isSeparated(motor, pc, pa)) { pe = 0.4 * pa; penalty = 0.85; }
+  // A chamber that cannot beat the (separation-clamped) exit pressure
+  // drives no supersonic flow at all: no thrust, rather than the NaN the
+  // momentum root below would return for pe > pc. This is the first
+  // ~0.1 s of every throttle ramp from zero at sea level (pc of a few
+  // kPa) -- and a NaN there used to leak through the pad-pin's
+  // `thrust <= weight` test (false for NaN) into the integrator and the
+  // gimbal controller, leaving the vehicle stuck on the pad with a NaN
+  // gimbal for the rest of the flight (caught live in the launch
+  // countdown; reproduced headlessly in tests/js/test-flight-stages.js).
+  if (pe >= pc) return 0;
   const momentum = Math.sqrt((2 * k * k / (k - 1)) * Math.pow(2 / (k + 1), (k + 1) / (k - 1)) * (1 - Math.pow(pe / pc, (k - 1) / k)));
   const pressureTerm = (pe - pa) * RSX.areaRatio(motor.nozzle) / pc;
-  return penalty * motor.nozzle.efficiency * (momentum + pressureTerm);
+  // An engine never pulls: at chamber pressures barely above ambient the
+  // over-expansion pressure term can outweigh the momentum term in this
+  // simplified model -- floor it at zero thrust.
+  return Math.max(0, penalty * motor.nozzle.efficiency * (momentum + pressureTerm));
 };
 RSX.thrustN = (motor, pc, pa) => RSX.thrustCoefficient(motor, pc, pa) * RSX.throatArea(motor.nozzle) * pc;
 RSX.massFlow = (motor, pc) => (pc <= 0 ? 0 : pc * RSX.throatArea(motor.nozzle) / motor.propellant.cstar);

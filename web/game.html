@@ -235,6 +235,12 @@
   .mode-tabs button:not(.active):hover { background: var(--card-hover); color: var(--ink); }
 
   #screen-assembly { display: flex; flex-direction: column; height: 100%; }
+  /* Same specificity trap as #checklistModal below: the id rule's
+     `display:flex` beats the UA's `[hidden] { display:none }`, so
+     launchInto()'s `screen-assembly.hidden = true` left the camera bar,
+     status strip and CONTROLS button painted over the flight view
+     (caught live while verifying a launch from the Assembly screen). */
+  #screen-assembly[hidden] { display: none; }
   .assembly-body { flex: 1; position: relative; background: #05070a; }
   /* Without an explicit CSS size, a <canvas> falls back to its own
      width/height ATTRIBUTES for layout -- and assembly-3d.js's resize()
@@ -497,6 +503,10 @@
 <script src="js/rocket/stats.js"></script>
 <script src="js/rocket/validate.js"></script>
 <script src="js/rocket/assembly-layout.js"></script>
+<script src="js/rocket/stack-rules.js"></script>
+<script src="js/rocket/flight.js"></script>
+<script src="js/rocket/designs.js"></script>
+<script src="js/rocket/telemetry.js"></script>
 <!-- Three.js's own OrbitControls addon imports "three" as a bare module
      specifier internally; without this import map the browser cannot
      resolve it (bare specifiers are only legal via an import map) and
@@ -974,17 +984,16 @@ function initFlight(design) {
 // hardcoded RSX.testVehicle.build() this used to call -- that function now
 // lives on only as flight-loop.js's regression oracle (proven identical to
 // this in tests/js/test-rocket-vehicle.js), it is no longer what the game
-// flies. The thrust/mdot/burn wrappers are unchanged: they were already
-// generic over any veh with a motor and a part named "tank".
+// flies. The thrust/mdot/burn closures come from js/rocket/flight.js
+// (RSX.rocket.flight.attach): generic over the ACTIVE stage and, for a
+// one-stage vehicle, numerically identical to the old testVehicle wrappers
+// (tests/js/test-flight-stages.js).
 //
 // `design` comes from the build screen above (#screen-build), in the same
 // page, in memory -- no localStorage/page-navigation handoff needed now
 // that builder and flight are one page (see launchInto() near the top of
 // this script).
-const veh = RSX.rocket.buildVehicle(design);
-veh.thrustNow = (pa, thr) => RSX.testVehicle.thrustNow(veh, pa, thr);
-veh.mdotNow = (pa, thr) => RSX.testVehicle.mdotNow(veh, pa, thr);
-veh.advanceBurn = (A, dtStep) => RSX.testVehicle.advanceBurn(veh, A, dtStep);
+const veh = RSX.rocket.flight.attach(RSX.rocket.buildVehicle(design));
 
 const S = { rx: 0, ry: planet.R, vx: -planet.wp * planet.R, vy: 0, th: Math.PI / 2, om: 0, t: 0, mode: "INTEGRATED" };
 const ctrl = { throttle: 0, gimbal: 0, tauRCS: 0, thetaCmd: Math.PI / 2 };

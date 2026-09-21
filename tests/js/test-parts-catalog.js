@@ -3,7 +3,7 @@
    actually enforces them instead of silently accepting an incomplete def. */
 "use strict";
 
-const REQUIRED_CLASSES = ["nose", "pod", "tank", "engine", "fin"];
+const REQUIRED_CLASSES = ["nose", "pod", "tank", "engine", "fin", "decoupler"];
 
 test("every registered part has the full descriptive schema", function () {
   const all = RSX.PARTS.all();

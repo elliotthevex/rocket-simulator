@@ -136,6 +136,29 @@ RR2._partPortraitDrawers = {
     ctx.restore();
   },
 
+  decoupler(ctx, def, w, h, skin) {
+    const L = def.L, D = 2 * def.R;
+    const { ppm, ox, oy } = fitPpm(w, h, D, L, 0.14);
+    ctx.save(); ctx.translate(ox, oy); ctx.scale(ppm, ppm);
+    RR2.drawBodySegment(ctx, L, D, skin, ppm, 0);
+    // The separation plane: a dark band across the ring with a notch at
+    // each edge, the one cue that says "this joint comes apart" rather
+    // than "another plain body segment".
+    const bandY = L * 0.42, bandH = L * 0.16;
+    ctx.fillStyle = "#1B2A33";
+    ctx.fillRect(-D / 2, bandY, D, bandH);
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    const notch = D * 0.05;
+    ctx.fillRect(-D / 2, bandY, notch, bandH);
+    ctx.fillRect(D / 2 - notch, bandY, notch, bandH);
+    // Frangible-joint bolts along the band
+    ctx.fillStyle = "#E0973A";
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath(); ctx.arc(i * D * 0.16, bandY + bandH / 2, Math.min(bandH * 0.22, D * 0.03), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  },
+
   // Fallback so a future part class with no dedicated drawer degrades to a
   // clearly-labelled placeholder rather than a blank canvas or an error
   // (§19: never a broken image, but never pretend a real asset either).

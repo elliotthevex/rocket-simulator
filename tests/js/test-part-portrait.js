@@ -81,13 +81,21 @@ test("each cls dispatches to a visibly different drawing routine (not one generi
       seen.clear();
       RSX.render.drawPartPortrait(makeStubCtx(), def, 200, 200);
       if (def.cls === "nose") assert(seen.has("drawNoseCone"), def.id + " should call drawNoseCone");
-      if (def.cls === "pod" || def.cls === "tank") assert(seen.has("drawBodySegment"), def.id + " should call drawBodySegment");
+      if (def.cls === "pod" || def.cls === "tank" || def.cls === "decoupler") assert(seen.has("drawBodySegment"), def.id + " should call drawBodySegment");
       if (def.cls === "engine") assert(seen.has("drawEngineBell"), def.id + " should call drawEngineBell");
       if (def.cls === "fin") assert(seen.has("drawFins"), def.id + " should call drawFins");
     });
   } finally {
     unwraps.forEach((u) => u());
   }
+});
+
+test("the decoupler has a dedicated drawer (never the _unknown placeholder)", function () {
+  assert(typeof RSX.render._partPortraitDrawers.decoupler === "function", "expected a decoupler drawer");
+  const ctx = makeStubCtx();
+  RSX.render.drawPartPortrait(ctx, RSX.PARTS.get("decoupler.s"), 200, 200);
+  assert(ctx.calls.indexOf("strokeRect") === -1, "decoupler.s must not draw the placeholder rect");
+  assert(ctx.calls.filter((c) => c === "arc").length >= 3, "expected the separation-band bolt marks to be drawn");
 });
 
 test("an unrecognised cls falls back to the labelled placeholder instead of throwing or drawing nothing", function () {

@@ -13,29 +13,35 @@ RSX.rocket = RSX.rocket || {};
 
 /**
  * assemblyLayout(design) -> {
- *   parts: [{ id, def, cls, sTop, sBot, sMid, L, R }, ...],   // nose-first, stack order
- *   finOn: { id, def, sMid, R } | null,
+ *   parts: [{ id, def, cls, sTop, sBot, sMid, L, R, index, stage }, ...],   // nose-first, stack order
+ *   finOn: { id, def, sMid, R, index } | null,   // def = the FIN def (design.fin, default fin.d)
+ *   stages: RSX.rocket.stagesOf(stack) (bottom-first),
  *   sTail, sMid (of the whole vehicle, for camera framing), maxR
  * }
- * Never throws for an unknown finOn id (returns finOn: null instead) --
- * this is display geometry, not the flight-critical vehicle builder.
+ * Accepts either design form (legacy finOn: partId or v2 finAt: index --
+ * see RSX.rocket.normalizeDesign). Never throws for a dangling fin
+ * reference (returns finOn: null instead) -- this is display geometry,
+ * not the flight-critical vehicle builder.
  */
 RSX.rocket.assemblyLayout = function (design) {
+  design = RSX.rocket.normalizeDesign(design);
   const laid = RSX.rocket.layoutStack(design.stack);
-  const parts = laid.map((p) => ({
+  const stages = RSX.rocket.stagesOf(design.stack);
+  const parts = laid.map((p, i) => ({
     id: p.id, def: p.def, cls: p.def.cls, sTop: p.sTop, sBot: p.sBot, sMid: p.sMid,
-    L: p.sBot - p.sTop, R: p.def.R,
+    L: p.sBot - p.sTop, R: p.def.R, index: i,
+    stage: stages.find((st) => i >= st.iStart && i <= st.iEnd).n,
   }));
 
   let finOn = null;
-  if (design.finOn) {
-    const host = parts.find((p) => p.id === design.finOn);
-    if (host) finOn = { id: host.id, def: RSX.PARTS.get("fin.d"), sMid: host.sMid, R: host.R };
+  if (design.finAt != null && parts[design.finAt] && RSX.PARTS.has(design.fin)) {
+    const host = parts[design.finAt];
+    finOn = { id: host.id, def: RSX.PARTS.get(design.fin), sMid: host.sMid, R: host.R, index: host.index };
   }
 
   const sTail = parts.length ? parts[parts.length - 1].sBot : 0;
   const maxR = parts.reduce((m, p) => Math.max(m, p.R), 0);
-  return { parts, finOn, sTail, sMid: sTail / 2, maxR };
+  return { parts, finOn, stages, sTail, sMid: sTail / 2, maxR };
 };
 
 if (typeof module !== "undefined") module.exports = RSX;

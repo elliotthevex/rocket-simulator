@@ -15,8 +15,19 @@ RSX.rocket = RSX.rocket || {};
  * is reported as a failed check here instead of propagating).
  */
 RSX.rocket.validate = function (design, veh, stats) {
+  design = RSX.rocket.normalizeDesign(design);
   const checks = [];
   const add = (id, ok, label, detail) => checks.push({ id, ok, label, detail: detail || "" });
+
+  // Structure (design/stage-2-plan.md §3.3): the hard stack rules the
+  // editor already refuses, re-checked here because a loaded/saved design
+  // bypasses the editor; then the per-stage completeness rule (S3).
+  const rules = RSX.rocket.rules ? RSX.rocket.rules.check(design.stack, design.finAt) : { ok: true, hard: [], soft: [] };
+  add("structure", rules.ok, "Structure", rules.ok ? "every part is where it can go" : rules.hard[0].reason);
+  const stageSoft = rules.soft.filter((r) => r.stage != null);
+  const nStages = RSX.rocket.stagesOf(design.stack).length;
+  add("stages", stageSoft.length === 0, "Stages",
+    stageSoft.length === 0 ? nStages + (nStages === 1 ? " stage" : " stages") + ", each with a tank and an engine" : stageSoft[0].reason);
 
   const hasCommandPart = design.stack.some((id) => RSX.PARTS.get(id).cls === "pod");
   add("command", hasCommandPart, "Command module", hasCommandPart ? "present" : "no pod.* part in the stack");
