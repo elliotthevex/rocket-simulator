@@ -236,7 +236,18 @@
   .part-card.selected { border-color: var(--accent); background: rgba(224,151,58,0.12); }
   .part-card .pname { font-weight: 600; }
   .part-card .pmeta { color: var(--ink-dim); font-size: 12px; margin-top: 2px; }
-  .part-thumb { flex: none; width: 44px; height: 44px; border-radius: 3px; background: rgba(0,0,0,0.2); }
+  /* `position: static` overrides the page's global `canvas { position:
+     absolute; top:0; left:0 }` rule (written only for the flight
+     screen's full-viewport #cMain canvas, web/game.html:11) -- a bare
+     type selector loses to this class selector regardless of source
+     order, so this is the correct fix, not a workaround. Without it
+     every thumbnail canvas escapes to its nearest POSITIONED ancestor:
+     inside .part-card (position:relative) that happened to look
+     plausible by coincidence; inside the detail modal, whose nearest
+     positioned ancestor is the full-viewport #partDetailModal, it
+     rendered pinned to the browser's top-left corner instead of inside
+     the panel -- caught live, not assumed correct from a screenshot. */
+  .part-thumb { position: static; flex: none; width: 44px; height: 44px; border-radius: 3px; background: rgba(0,0,0,0.2); }
   .part-card .pcol { flex: 1 1 auto; min-width: 0; }
   .info-btn {
     flex: none; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--border);
@@ -285,6 +296,29 @@
   .check-line .detail { color: var(--ink-dim); font-size: 12px; }
   #checklistModal .modal-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
 
+  /* ---- component detail panel (spec §3): a real image + full spec sheet
+     for whichever part was last clicked's info button. Same [hidden]
+     pattern as #checklistModal above -- this rule is written WITH the
+     override from the start this time, not bolted on after a bug report. */
+  #partDetailModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 70; }
+  #partDetailModal[hidden] { display: none; }
+  #partDetailModal .box { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 460px; max-width: 92vw; max-height: 88vh; overflow-y: auto; }
+  #partDetailModal .detail-head { display: flex; gap: 14px; margin-bottom: 12px; }
+  #partDetailModal .detail-portrait { flex: none; width: 180px; height: 140px; border-radius: 4px; background: rgba(0,0,0,0.25); border: 1px solid var(--border); }
+  #partDetailModal .detail-titles { flex: 1 1 auto; min-width: 0; }
+  #partDetailModal .detail-titles h2 { margin: 0 0 2px; font-size: 18px; text-transform: uppercase; letter-spacing: 0.04em; }
+  #partDetailModal .detail-sub { color: var(--ink-dim); font-size: 12px; }
+  #partDetailModal .detail-class-chip {
+    display: inline-block; margin-top: 6px; padding: 2px 7px; border-radius: 3px; font-size: 10px;
+    font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    background: rgba(224,151,58,0.16); color: var(--accent);
+  }
+  #partDetailModal .detail-desc { font-size: 12.5px; line-height: 1.5; color: var(--ink-dim); margin: 10px 0 14px; }
+  #partDetailModal .detail-specs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin-bottom: 16px; }
+  #partDetailModal .detail-specs .stat-row { font-size: 12px; }
+  #partDetailModal .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+  #partDetailModal .sim-value-note { font-size: 10.5px; color: var(--ink-dim); font-style: italic; margin: -8px 0 14px; }
+
 /* ---- flight-screen "back to builder" affordance ---- */
 #btnBackToBuilder {
   position: fixed; left: 12px; bottom: 12px; z-index: 60;
@@ -314,6 +348,7 @@
   </footer>
 </div>
 <div id="checklistModal" hidden></div>
+<div id="partDetailModal" hidden></div>
 </div>
 <div id="screen-flight" hidden>
 <canvas id="cMain"></canvas>
@@ -432,23 +467,46 @@ const fmtMass = (kg) => kg >= 1000 ? (kg / 1000).toFixed(2) + " t" : Math.round(
 const fmtForce = (n) => (n / 1000).toFixed(1) + " kN";
 const fmtSpeed = (v) => Math.round(v) + " m/s";
 
+// Builds an engine object from a catalog def's engine{} sub-record --
+// used by both the palette card meta line and the detail panel, so the
+// two never compute slightly-different numbers for the same part.
+function motorFromEngineDef(eng) {
+  const preset = RSX.FUEL_PRESETS[eng.propKey];
+  const nozzle = { throatD: eng.throatD, exitD: eng.exitD, efficiency: eng.efficiency };
+  return { ...RSX.makeMotor({ cstar: preset.propellant.cstar, k: preset.propellant.k }, null, nozzle), pcDesign: eng.pcDesign };
+}
+
 function paletteCardHtml(def, slotName) {
   const selected = selection[slotName] === def.id ? " selected" : "";
   let meta = "";
   if (def.tank) meta = fmtMass(def.tank.massFull) + " " + def.tank.propKey.toUpperCase();
   else if (def.engine) {
     const pa0 = RSX.atmosphere(0, RSX.PLANETS.home).P;
-    const nozzle = { throatD: def.engine.throatD, exitD: def.engine.exitD, efficiency: def.engine.efficiency };
-    const preset = RSX.FUEL_PRESETS[def.engine.propKey];
-    const motor = { ...RSX.makeMotor({ cstar: preset.propellant.cstar, k: preset.propellant.k }, null, nozzle), pcDesign: def.engine.pcDesign };
+    const motor = motorFromEngineDef(def.engine);
     const tSL = RSX.thrustN(motor, motor.pcDesign, pa0);
     meta = fmtForce(tSL) + " SL, " + fmtMass(def.dryMass) + " dry";
   } else {
     meta = fmtMass(def.dryMass);
   }
   return '<div class="part-card' + selected + '" data-slot="' + slotName + '" data-id="' + def.id + '">' +
-    '<div class="pname">' + def.name + ' <span style="color:var(--ink-dim);font-weight:400;">(' + def.id + ')</span></div>' +
-    '<div class="pmeta">' + meta + '</div></div>';
+    '<canvas class="part-thumb" width="44" height="44" data-portrait-id="' + def.id + '"></canvas>' +
+    '<div class="pcol"><div class="pname">' + def.name + ' <span style="color:var(--ink-dim);font-weight:400;">(' + def.id + ')</span></div>' +
+    '<div class="pmeta">' + meta + '</div></div>' +
+    '<button class="info-btn" type="button" data-info-id="' + def.id + '" title="Component details">i</button>' +
+    '</div>';
+}
+
+// Paints every .part-thumb canvas under `root` (palette cards, stack
+// view, the detail panel's own larger portrait). Called after any
+// innerHTML rebuild, since that always creates fresh (blank) canvas
+// elements. A handful of vector-art draws per thumbnail is cheap enough
+// (no caching) at this catalog size; revisit if the catalog grows large
+// enough for repaint cost to matter.
+function paintThumbnails(root) {
+  root.querySelectorAll(".part-thumb[data-portrait-id]").forEach((canvas) => {
+    const def = RSX.PARTS.get(canvas.dataset.portraitId);
+    RSX.render.drawPartPortrait(canvas.getContext("2d"), def, canvas.width, canvas.height);
+  });
 }
 
 function renderPalette() {
@@ -460,16 +518,27 @@ function renderPalette() {
     section("Nose", "nose") + section("Command", "pod") + section("Tank", "tank") + section("Engine", "engine") +
     '<div class="slot"><h3>Aerodynamic</h3>' +
     '<div class="fin-toggle' + (selection.fins ? " on" : "") + '" id="finToggle">' +
+    '<canvas class="part-thumb" width="36" height="36" data-portrait-id="fin.d" style="margin-right:2px;"></canvas>' +
     '<input type="checkbox" ' + (selection.fins ? "checked" : "") + ' style="pointer-events:none;">' +
-    ' Fin set (fin.d) -- adds pitch stability</div></div>';
+    ' Fin set (fin.d) -- adds pitch stability' +
+    '<button class="info-btn" type="button" data-info-id="fin.d" title="Component details" style="margin-left:auto;">i</button>' +
+    '</div></div>';
 
+  paintThumbnails(el);
   el.querySelectorAll(".part-card").forEach((card) => {
     card.addEventListener("click", () => {
       selection[card.dataset.slot] = card.dataset.id;
       renderAll();
     });
   });
-  document.getElementById("finToggle").addEventListener("click", () => {
+  el.querySelectorAll(".info-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation(); // must not also trigger the parent .part-card's select-on-click
+      showPartDetail(RSX.PARTS.get(btn.dataset.infoId));
+    });
+  });
+  document.getElementById("finToggle").addEventListener("click", (e) => {
+    if (e.target.closest(".info-btn")) return; // the info button's own listener (above) already handled this click
     selection.fins = !selection.fins;
     renderAll();
   });
@@ -483,8 +552,10 @@ function renderStack(design) {
       : def.engine ? "engine" : fmtMass(def.dryMass);
     const finsHere = design.finOn === id ? '<div class="sp-fins"></div>' : "";
     return '<div class="stack-part" style="height:' + Math.max(36, def.L * 14) + 'px;">' +
+      '<canvas class="part-thumb" width="32" height="32" data-portrait-id="' + id + '" style="margin-bottom:4px;"></canvas>' +
       '<div class="sp-name">' + def.name + '</div><div class="sp-meta">' + meta + '</div>' + finsHere + '</div>';
   }).join("");
+  paintThumbnails(el);
 }
 
 function renderStats(veh, stats) {
@@ -506,6 +577,93 @@ function renderStats(veh, stats) {
     rows.map(([l, v]) => '<div class="stat-row"><span class="label">' + l + '</span><span class="val">' + v + '</span></div>').join("") +
     '<div class="stat-row"><span class="label">Stability (M0.3)</span><span class="val">' +
     stats.mach03Margin.toFixed(2) + ' cal <span class="stability-chip ' + label + '">' + label + '</span></span></div>';
+}
+
+// Which selection slot a part class fills -- "fin" has no slot (it's the
+// on/off toggle), so it is handled separately below.
+const SLOT_FOR_CLASS = { nose: "nose", pod: "pod", tank: "tank", engine: "engine" };
+
+/**
+ * The per-class spec-sheet rows for the component detail panel (spec §1/
+ * §11): only fields this project actually computes or stores are shown
+ * -- no invented precision, and role-specific fields (thrust/Isp, tank
+ * capacity, fin C_Na) only appear for the class that has them.
+ */
+function detailSpecRows(def) {
+  const rows = [
+    ["Class", def.cls[0].toUpperCase() + def.cls.slice(1)],
+    ["Dry mass", fmtMass(def.dryMass)],
+    ["Length", def.L ? def.L.toFixed(2) + " m" : "—"],
+    ["Diameter", def.R ? (2 * def.R).toFixed(2) + " m" : "—"],
+    ["Material", def.material],
+    ["Manufacturer", def.manufacturer],
+    ["Cost", "§" + def.cost.toLocaleString()], // section-mark, not a real-world currency symbol -- simulator cost only
+  ];
+  if (def.tank) {
+    rows.push(["Propellant", def.tank.propKey.toUpperCase()]);
+    rows.push(["Capacity", fmtMass(def.tank.massFull)]);
+  }
+  if (def.engine) {
+    const pa0 = RSX.atmosphere(0, RSX.PLANETS.home).P;
+    const motor = motorFromEngineDef(def.engine);
+    const tSL = RSX.thrustN(motor, motor.pcDesign, pa0), tVac = RSX.thrustN(motor, motor.pcDesign, 0);
+    const mdot = RSX.massFlow(motor, motor.pcDesign);
+    const ispSL = mdot > 0 ? tSL / (mdot * RSX.GRAVITY_REF) : 0, ispVac = mdot > 0 ? tVac / (mdot * RSX.GRAVITY_REF) : 0;
+    rows.push(["Propellant", def.engine.propKey.toUpperCase()]);
+    rows.push(["Thrust (SL / vac)", fmtForce(tSL) + " / " + fmtForce(tVac)]);
+    rows.push(["Isp (SL / vac)", Math.round(ispSL) + " / " + Math.round(ispVac) + " s"]);
+    rows.push(["Chamber pressure", (def.engine.pcDesign / 1e6).toFixed(1) + " MPa"]);
+    rows.push(["Sea-level flow", RSX.isSeparated(motor, motor.pcDesign, pa0) ? "⚠ flow-separated" : "attached"]);
+  }
+  if (def.fin) {
+    rows.push(["Normal-force slope (C_Nα)", def.fin.CNa.toFixed(1)]);
+    rows.push(["Root chord / span", def.fin.rootChord.toFixed(2) + " / " + def.fin.span.toFixed(2) + " m"]);
+  }
+  return rows;
+}
+
+/**
+ * Opens the component detail panel for `def` (spec §3): a real portrait
+ * (RSX.render.drawPartPortrait -- the SAME drawing the palette thumbnail
+ * and the flight view itself use, not a separate asset), a full spec
+ * sheet, and a primary action that puts the part into its rocket slot
+ * (or toggles the fin set) without requiring the player to also find and
+ * click the palette card again.
+ */
+function showPartDetail(def) {
+  const modal = document.getElementById("partDetailModal");
+  const slot = SLOT_FOR_CLASS[def.cls];
+  const actionLabel = def.cls === "fin" ? (selection.fins ? "Remove from rocket" : "Add to rocket")
+    : (selection[slot] === def.id ? "Currently selected" : "Add to rocket");
+  const actionDisabled = def.cls !== "fin" && selection[slot] === def.id;
+  modal.innerHTML =
+    '<div class="box">' +
+    '<div class="detail-head">' +
+    '<canvas class="detail-portrait part-thumb" width="180" height="140" data-portrait-id="' + def.id + '"></canvas>' +
+    '<div class="detail-titles"><h2>' + def.name + '</h2>' +
+    '<div class="detail-sub">' + def.id + ' — ' + def.manufacturer + '</div>' +
+    '<span class="detail-class-chip">' + def.cls + '</span></div>' +
+    '</div>' +
+    '<div class="detail-desc">' + def.description + '</div>' +
+    '<div class="sim-value-note">All figures below are computed by this simulator\'s own physics model, not real-world component data.</div>' +
+    '<div class="detail-specs">' +
+    detailSpecRows(def).map(([l, v]) => '<div class="stat-row"><span class="label">' + l + '</span><span class="val">' + v + '</span></div>').join("") +
+    '</div>' +
+    '<div class="modal-actions">' +
+    '<button id="btnDetailClose">Close</button>' +
+    '<button id="btnDetailAdd" class="primary"' + (actionDisabled ? " disabled" : "") + '>' + actionLabel + '</button>' +
+    '</div></div>';
+  modal.hidden = false;
+  paintThumbnails(modal);
+  modal.querySelector("#btnDetailClose").addEventListener("click", () => { modal.hidden = true; });
+  if (!actionDisabled) {
+    modal.querySelector("#btnDetailAdd").addEventListener("click", () => {
+      if (def.cls === "fin") selection.fins = !selection.fins;
+      else selection[slot] = def.id;
+      modal.hidden = true;
+      renderAll();
+    });
+  }
 }
 
 function renderAll() {
