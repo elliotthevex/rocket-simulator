@@ -1,17 +1,28 @@
 /* =====================================================================
-   FLIGHT LOOP — wires physics-core.js to one hardcoded vehicle for the
-   Step 5 vertical-slice gate: "one hardcoded rocket flies and looks real."
-   No staging, no builder, no HUD yet -- those are later build steps.
+   FLIGHT LOOP — originally wired physics-core.js to one hardcoded vehicle
+   for the Step 5 vertical-slice gate: "one hardcoded rocket flies and
+   looks real." game.html no longer calls RSX.testVehicle.build() to fly
+   -- it builds its vehicle from data instead (js/parts/catalog.js +
+   js/rocket/vehicle.js, RSX.rocket.buildVehicle). This file's remaining
+   job is the regression oracle those are checked against
+   (tests/js/test-rocket-vehicle.js) and the headless test harness below
+   (RSX.testVehicle.simulate), so it is kept, not deleted.
+   thrustNow/mdotNow/advanceBurn are still live: they are generic over any
+   veh with a motor and a part named "tank", so game.html's vehicle uses
+   them too.
    ===================================================================== */
 "use strict";
 
 RSX.testVehicle = {};
 
 /**
- * Build a single-stage test vehicle: nose + probe + a small RP-1 tank +
- * a sea-level engine (dims matched to design/game-mechanics.md ENG-K1),
- * with two fins for pitch stability. Station s = metres from nose tip,
- * positive aft (matches physics-core convention).
+ * Build the single-stage vehicle this file used to fly directly: nose +
+ * probe + a small RP-1 tank + a sea-level engine (dims matched to
+ * design/game-mechanics.md ENG-K1), with two fins for pitch stability.
+ * Station s = metres from nose tip, positive aft (matches physics-core
+ * convention). Kept as the regression oracle for RSX.rocket.buildVehicle
+ * (web/js/rocket/vehicle.js) -- the two must keep producing numerically
+ * identical vehicles.
  */
 RSX.testVehicle.build = function () {
   const propKey = "rp1";

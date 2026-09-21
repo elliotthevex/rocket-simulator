@@ -219,6 +219,8 @@
 <script src="js/renderer.js"></script>
 <script src="js/flight-loop.js"></script>
 <script src="js/physics/control.js"></script>
+<script src="js/parts/catalog.js"></script>
+<script src="js/rocket/vehicle.js"></script>
 <script>
 "use strict";
 // let, not const: arriveAtMars() below reassigns this once the interplanetary
@@ -242,7 +244,13 @@ function resize() {
 resize();
 window.addEventListener("resize", resize);
 
-const veh = RSX.testVehicle.build();
+// Built from data (js/parts/catalog.js + js/rocket/vehicle.js), not the
+// hardcoded RSX.testVehicle.build() this used to call -- that function now
+// lives on only as flight-loop.js's regression oracle (proven identical to
+// this in tests/js/test-rocket-vehicle.js), it is no longer what the game
+// flies. The thrust/mdot/burn wrappers are unchanged: they were already
+// generic over any veh with a motor and a part named "tank".
+const veh = RSX.rocket.buildVehicle(RSX.rocket.CADET_I);
 veh.thrustNow = (pa, thr) => RSX.testVehicle.thrustNow(veh, pa, thr);
 veh.mdotNow = (pa, thr) => RSX.testVehicle.mdotNow(veh, pa, thr);
 veh.advanceBurn = (A, dtStep) => RSX.testVehicle.advanceBurn(veh, A, dtStep);
@@ -876,7 +884,8 @@ window.addEventListener("keydown", e => {
 // Catalog nozzle geometry chosen so the REAL thrustN()/massFlow() outputs
 // land close to the design pass's reference copy numbers below (ENG-K1 is
 // not a free choice -- it's the exact nozzle already built into
-// RSX.testVehicle.build()); the copy text is fixed reference prose, the
+// RSX.rocket.CADET_I's engine.k1 part, web/js/parts/catalog.js); the
+// copy text is fixed reference prose, the
 // live preview always calls the real physics functions regardless. exitD
 // on ENG-KV/ENG-H1 is also kept within a few % of the reference Isp so the
 // renderer's actual bell length (Ln = 1.4*(Re-Rt)/tan15deg,
@@ -1053,7 +1062,7 @@ const engineApplyBtn = document.getElementById("engineApplyBtn");
 const panelCloseBtn = partPanelEl.querySelector(".panel-close");
 
 let openPart = null;
-let currentEngineId = "ENG-K1"; // matches RSX.testVehicle.build()'s hardcoded engine
+let currentEngineId = "ENG-K1"; // matches RSX.rocket.CADET_I's engine.k1 part
 let selectedEngineId = "ENG-K1";
 
 function closePanel() {
