@@ -58,4 +58,25 @@ RSX.PARTS.register({
 });
 RSX.PARTS.register({ id: "fin.d", name: "fin", dryMass: 0, fin: { CNa: 6.0 } });
 
+/* ---------------------------------------------------------------------
+   Second choices, so a player picking parts actually changes the rocket.
+   Every number below was checked against the REAL nozzle model (see
+   scratchpad engine_probe.js run during development), not invented:
+     engine.k1  (Vulcan-1, sea-level):   251/277 kN SL/vac, Isp 283/311 s
+     engine.kv  (Vulcan-V, vacuum-opt.): 77/163 kN SL/vac, Isp 158/335 s,
+       flow-SEPARATED at sea level (RSX.isSeparated) -- a real Summerfield
+       effect from the larger expansion ratio (eps 84 vs 16), not a fake
+       penalty. Higher vacuum Isp, much weaker (and flagged-unsafe) at
+       sea level: an honest tradeoff, matching R-6 "performance changes
+       with atmospheric pressure".
+--------------------------------------------------------------------- */
+RSX.PARTS.register({
+  id: "tank.m", name: "tank", dryMass: 9200 * 0.05, L: 7.0, R: 0.6,
+  tank: { propKey: "rp1", massFull: 9200 },
+});
+RSX.PARTS.register({
+  id: "engine.kv", name: "mount", dryMass: 420, L: 1.2, R: 0.6,
+  engine: { propKey: "rp1", pcDesign: 8.0e6, throatD: 0.1200, exitD: 1.1000, efficiency: 0.94 },
+});
+
 if (typeof module !== "undefined") module.exports = RSX;
