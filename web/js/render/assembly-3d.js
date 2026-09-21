@@ -188,8 +188,15 @@ function buildTank(part) {
   const feedR = Math.max(R * 0.045, 0.012);
   const feedLen = cylinderLen * 0.9;
   const feedAngle = 0.62; // a fixed radian offset -- every tank's feed line lands at the same clock position, so stacked tanks read as one continuous line running to the engine
+  // Offset is the tank's OWN radius plus a bit less than the tube's own
+  // radius -- i.e. the tube's centre sits just outside the skin, so it
+  // reads as a pipe strapped to the OUTSIDE of the tank (half-embedded
+  // in the surface, half exposed) instead of (a prior bug) sitting
+  // entirely inside R, where the opaque tank shell would fully occlude
+  // it from every camera angle.
+  const feedOffset = R + feedR * 0.55;
   const feed = new THREE.Mesh(new THREE.CylinderGeometry(feedR, feedR, feedLen, 10), feedMat);
-  feed.position.set(R * 0.74 * Math.cos(feedAngle), cylTop - cylinderLen / 2, R * 0.74 * Math.sin(feedAngle));
+  feed.position.set(feedOffset * Math.cos(feedAngle), cylTop - cylinderLen / 2, feedOffset * Math.sin(feedAngle));
   feed.castShadow = true;
   grp.add(feed);
 
