@@ -1,0 +1,276 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Rocket Builder</title>
+<style>
+  :root {
+    --bg: #12161a; --panel: #181d22; --card: #1e242b; --card-hover: #262e37;
+    --ink: #e7edf2; --ink-dim: #8d9aa6; --border: #2c343c;
+    --accent: #e0973a; --accent-ink: #241000;
+    --ok: #3fb87f; --warn: #e0973a; --bad: #e0554a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  h1, h2, h3 { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0 0 8px; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: 12px; }
+  header h1 { font-size: 18px; letter-spacing: 0.04em; }
+  header .sub { color: var(--ink-dim); font-size: 12px; }
+  .columns { flex: 1; display: grid; grid-template-columns: 260px 1fr 300px; overflow: hidden; }
+  aside, main { overflow-y: auto; padding: 14px; }
+  #palette { border-right: 1px solid var(--border); background: var(--panel); }
+  #statsPanel { border-left: 1px solid var(--border); background: var(--panel); }
+  .slot { margin-bottom: 18px; }
+  .slot h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-dim); margin-bottom: 6px; }
+  .part-card { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px;
+    margin-bottom: 6px; cursor: pointer; transition: background 0.1s; }
+  .part-card:hover { background: var(--card-hover); }
+  .part-card.selected { border-color: var(--accent); background: rgba(224,151,58,0.12); }
+  .part-card .pname { font-weight: 600; }
+  .part-card .pmeta { color: var(--ink-dim); font-size: 12px; margin-top: 2px; }
+  .fin-toggle { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 10px; cursor: pointer; }
+  .fin-toggle.on { border-color: var(--accent); background: rgba(224,151,58,0.12); }
+  #stackView { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 0; padding-top: 30px; }
+  .stack-part { width: 160px; background: var(--card); border: 1px solid var(--border); text-align: center;
+    padding: 10px 6px; position: relative; }
+  .stack-part + .stack-part { border-top: none; }
+  .stack-part .sp-name { font-weight: 600; }
+  .stack-part .sp-meta { color: var(--ink-dim); font-size: 11px; margin-top: 2px; }
+  .stack-part .sp-fins { position: absolute; right: -34px; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 3px; background: var(--accent); }
+  .stat-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .stat-row .label { color: var(--ink-dim); }
+  .stat-row .val { font-variant-numeric: tabular-nums; }
+  .stability-chip { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+  .stability-chip.STABLE { background: rgba(63,184,127,0.18); color: var(--ok); }
+  .stability-chip.MARGINAL { background: rgba(224,151,58,0.18); color: var(--warn); }
+  .stability-chip.UNSTABLE { background: rgba(224,85,74,0.18); color: var(--bad); }
+  footer { border-top: 1px solid var(--border); padding: 12px 16px; display: flex; gap: 10px; align-items: center; background: var(--panel); }
+  button { font: inherit; padding: 8px 16px; border-radius: 4px; border: 1px solid var(--border); background: var(--card);
+    color: var(--ink); cursor: pointer; }
+  button:hover { background: var(--card-hover); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+  button.primary:hover { filter: brightness(1.08); }
+  #checkResult { margin-left: auto; font-size: 12px; color: var(--ink-dim); }
+  #checklistModal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
+  #checklistModal .box { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 420px; max-width: 92vw; }
+  .check-line { display: flex; gap: 8px; padding: 5px 0; align-items: flex-start; }
+  .check-line .mark { width: 16px; flex: none; }
+  .check-line.ok .mark { color: var(--ok); }
+  .check-line.fail .mark { color: var(--bad); }
+  .check-line .detail { color: var(--ink-dim); font-size: 12px; }
+  #checklistModal .modal-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>ROCKET BUILDER</h1>
+    <span class="sub">Pick a nose, command module, tank and engine. Every number on the right comes from the real flight physics -- nothing here is invented.</span>
+  </header>
+  <div class="columns">
+    <aside id="palette"></aside>
+    <main id="stackView"></main>
+    <aside id="statsPanel"></aside>
+  </div>
+  <footer>
+    <button id="btnFlightDirect">Skip to flight (default rocket)</button>
+    <span id="checkResult"></span>
+    <button id="btnLaunch" class="primary">LAUNCH</button>
+  </footer>
+</div>
+<div id="checklistModal" hidden></div>
+
+<script src="js/physics-core.js"></script>
+<script src="js/parts/catalog.js"></script>
+<script src="js/rocket/vehicle.js"></script>
+<script src="js/rocket/stats.js"></script>
+<script src="js/rocket/validate.js"></script>
+<script>
+"use strict";
+/* =====================================================================
+   BUILDER UI — first working slice of R-3/R-34..R-36. Deliberately
+   scoped: four FIXED slots (nose, command, tank, engine) each choosing
+   among the catalog's options for that role, plus a fin toggle, rather
+   than free vertical placement with attachment nodes. That fuller
+   version (drag/click-to-place anywhere, delete, duplicate, undo/redo,
+   symmetry, multiple tanks/engines) is real, additional scope, not yet
+   built -- fixed slots avoid the one failure mode this increment can't
+   yet validate against: a stack in a physically nonsensical order
+   (RSX.rocket.buildVehicle assumes stack[0] is the nose, see
+   web/js/rocket/vehicle.js). Nothing here is faked to look more capable
+   than it is (R-53).
+   ===================================================================== */
+
+function categoryOf(def) {
+  if (def.id.startsWith("nose.")) return "nose";
+  if (def.id.startsWith("pod.")) return "pod";
+  if (def.tank) return "tank";
+  if (def.engine) return "engine";
+  if (def.fin) return "fin";
+  return "other";
+}
+
+const byCategory = { nose: [], pod: [], tank: [], engine: [], fin: [] };
+RSX.PARTS.all().forEach((def) => {
+  const c = categoryOf(def);
+  if (byCategory[c]) byCategory[c].push(def);
+});
+
+const selection = {
+  nose: byCategory.nose[0].id,
+  pod: byCategory.pod[0].id,
+  tank: byCategory.tank[0].id,
+  engine: byCategory.engine[0].id,
+  fins: true,
+};
+
+function currentDesign() {
+  return {
+    stack: [selection.nose, selection.pod, selection.tank, selection.engine],
+    finOn: selection.fins ? selection.engine : null,
+  };
+}
+
+const fmtMass = (kg) => kg >= 1000 ? (kg / 1000).toFixed(2) + " t" : Math.round(kg) + " kg";
+const fmtForce = (n) => (n / 1000).toFixed(1) + " kN";
+const fmtSpeed = (v) => Math.round(v) + " m/s";
+
+function paletteCardHtml(def, slotName) {
+  const selected = selection[slotName] === def.id ? " selected" : "";
+  let meta = "";
+  if (def.tank) meta = fmtMass(def.tank.massFull) + " " + def.tank.propKey.toUpperCase();
+  else if (def.engine) {
+    const pa0 = RSX.atmosphere(0, RSX.PLANETS.home).P;
+    const nozzle = { throatD: def.engine.throatD, exitD: def.engine.exitD, efficiency: def.engine.efficiency };
+    const preset = RSX.FUEL_PRESETS[def.engine.propKey];
+    const motor = { ...RSX.makeMotor({ cstar: preset.propellant.cstar, k: preset.propellant.k }, null, nozzle), pcDesign: def.engine.pcDesign };
+    const tSL = RSX.thrustN(motor, motor.pcDesign, pa0);
+    meta = fmtForce(tSL) + " SL, " + fmtMass(def.dryMass) + " dry";
+  } else {
+    meta = fmtMass(def.dryMass);
+  }
+  return '<div class="part-card' + selected + '" data-slot="' + slotName + '" data-id="' + def.id + '">' +
+    '<div class="pname">' + def.name + ' <span style="color:var(--ink-dim);font-weight:400;">(' + def.id + ')</span></div>' +
+    '<div class="pmeta">' + meta + '</div></div>';
+}
+
+function renderPalette() {
+  const el = document.getElementById("palette");
+  const section = (title, slotName) =>
+    '<div class="slot"><h3>' + title + '</h3>' +
+    byCategory[slotName].map((d) => paletteCardHtml(d, slotName)).join("") + '</div>';
+  el.innerHTML =
+    section("Nose", "nose") + section("Command", "pod") + section("Tank", "tank") + section("Engine", "engine") +
+    '<div class="slot"><h3>Aerodynamic</h3>' +
+    '<div class="fin-toggle' + (selection.fins ? " on" : "") + '" id="finToggle">' +
+    '<input type="checkbox" ' + (selection.fins ? "checked" : "") + ' style="pointer-events:none;">' +
+    ' Fin set (fin.d) -- adds pitch stability</div></div>';
+
+  el.querySelectorAll(".part-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      selection[card.dataset.slot] = card.dataset.id;
+      renderAll();
+    });
+  });
+  document.getElementById("finToggle").addEventListener("click", () => {
+    selection.fins = !selection.fins;
+    renderAll();
+  });
+}
+
+function renderStack(design) {
+  const el = document.getElementById("stackView");
+  el.innerHTML = design.stack.map((id) => {
+    const def = RSX.PARTS.get(id);
+    let meta = def.tank ? fmtMass(def.tank.massFull) + " " + def.tank.propKey.toUpperCase()
+      : def.engine ? "engine" : fmtMass(def.dryMass);
+    const finsHere = design.finOn === id ? '<div class="sp-fins"></div>' : "";
+    return '<div class="stack-part" style="height:' + Math.max(36, def.L * 14) + 'px;">' +
+      '<div class="sp-name">' + def.name + '</div><div class="sp-meta">' + meta + '</div>' + finsHere + '</div>';
+  }).join("");
+}
+
+function renderStats(veh, stats) {
+  const el = document.getElementById("statsPanel");
+  const label = RSX.rocket.stats.stabilityLabel(stats.mach03Margin);
+  const rows = [
+    ["Total mass", fmtMass(stats.massTotal)],
+    ["Dry mass", fmtMass(stats.massDry)],
+    ["Fuel mass", fmtMass(stats.massFuel)],
+    ["Thrust (SL)", fmtForce(stats.thrustSL) + (stats.isSeparatedAtPa0 ? " ⚠ flow-separated" : "")],
+    ["Thrust (vac)", fmtForce(stats.thrustVac)],
+    ["TWR (SL)", stats.twrSL.toFixed(2)],
+    ["Isp (SL / vac)", Math.round(stats.ispSL) + " / " + Math.round(stats.ispVac) + " s"],
+    ["Burn time", stats.burnTime.toFixed(1) + " s"],
+    ["Delta-v (vac)", fmtSpeed(stats.deltaV)],
+    ["Center of mass", stats.com.toFixed(2) + " m from nose"],
+  ];
+  el.innerHTML = "<h2>ROCKET STATISTICS</h2>" +
+    rows.map(([l, v]) => '<div class="stat-row"><span class="label">' + l + '</span><span class="val">' + v + '</span></div>').join("") +
+    '<div class="stat-row"><span class="label">Stability (M0.3)</span><span class="val">' +
+    stats.mach03Margin.toFixed(2) + ' cal <span class="stability-chip ' + label + '">' + label + '</span></span></div>';
+}
+
+function renderAll() {
+  const design = currentDesign();
+  renderPalette();
+  renderStack(design);
+  let veh, stats, result;
+  try {
+    veh = RSX.rocket.buildVehicle(design);
+    stats = RSX.rocket.stats.compute(veh, RSX.PLANETS.home);
+    result = RSX.rocket.validate(design, veh, stats);
+  } catch (e) {
+    document.getElementById("statsPanel").innerHTML = "<h2>ROCKET STATISTICS</h2><p style='color:var(--bad)'>" + e.message + "</p>";
+    document.getElementById("checkResult").textContent = "Cannot compute stats: " + e.message;
+    return;
+  }
+  renderStats(veh, stats);
+  document.getElementById("checkResult").textContent = result.ok ? "✓ Ready for launch" : "⚠ " + result.checks.filter((c) => !c.ok).length + " check(s) failed";
+}
+
+function showChecklist(result, onProceed) {
+  const modal = document.getElementById("checklistModal");
+  const lines = result.checks.map((c) =>
+    '<div class="check-line ' + (c.ok ? "ok" : "fail") + '"><span class="mark">' + (c.ok ? "✓" : "✗") + '</span>' +
+    '<div><div>' + c.label + '</div><div class="detail">' + c.detail + '</div></div></div>'
+  ).join("");
+  modal.innerHTML = '<div class="box"><h2>' + (result.ok ? "READY FOR LAUNCH" : "LAUNCH CHECK FAILED") + '</h2>' +
+    lines + '<div class="modal-actions">' +
+    '<button id="btnBack">Back to builder</button>' +
+    '<button id="btn' + (result.ok ? "Go" : "Anyway") + '" class="primary">' + (result.ok ? "LAUNCH" : "Launch anyway") + '</button>' +
+    '</div></div>';
+  modal.hidden = false;
+  modal.querySelector("#btnBack").addEventListener("click", () => { modal.hidden = true; });
+  const goBtn = modal.querySelector(result.ok ? "#btnGo" : "#btnAnyway");
+  goBtn.addEventListener("click", onProceed);
+}
+
+document.getElementById("btnLaunch").addEventListener("click", () => {
+  const design = currentDesign();
+  let result;
+  try {
+    const veh = RSX.rocket.buildVehicle(design);
+    const stats = RSX.rocket.stats.compute(veh, RSX.PLANETS.home);
+    result = RSX.rocket.validate(design, veh, stats);
+  } catch (e) {
+    result = { ok: false, checks: [{ id: "build", ok: false, label: "Vehicle", detail: e.message }] };
+  }
+  showChecklist(result, () => {
+    try { localStorage.setItem("rsx.builder.design", JSON.stringify(design)); } catch (e) { /* private mode etc: fall through, game.html falls back to its default */ }
+    location.href = "game.html";
+  });
+});
+document.getElementById("btnFlightDirect").addEventListener("click", () => {
+  try { localStorage.removeItem("rsx.builder.design"); } catch (e) {}
+  location.href = "game.html";
+});
+
+renderAll();
+</script>
+</body>
+</html>

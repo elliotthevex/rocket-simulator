@@ -250,7 +250,25 @@ window.addEventListener("resize", resize);
 // this in tests/js/test-rocket-vehicle.js), it is no longer what the game
 // flies. The thrust/mdot/burn wrappers are unchanged: they were already
 // generic over any veh with a motor and a part named "tank".
-const veh = RSX.rocket.buildVehicle(RSX.rocket.CADET_I);
+//
+// If builder.html just saved a design, fly that; otherwise fall back to
+// the default CADET_I so opening game.html directly (no builder step)
+// keeps working exactly as before (R-41: a corrupt/unreadable saved
+// design must never break the game, just fall back silently to default).
+function loadBuilderDesign() {
+  try {
+    const raw = localStorage.getItem("rsx.builder.design");
+    if (!raw) return null;
+    const design = JSON.parse(raw);
+    if (!design || !Array.isArray(design.stack) || design.stack.length === 0) return null;
+    RSX.rocket.buildVehicle(design); // throws if the design doesn't actually fly; caught below
+    return design;
+  } catch (e) {
+    console.warn("Ignoring unusable saved design from builder.html:", e.message);
+    return null;
+  }
+}
+const veh = RSX.rocket.buildVehicle(loadBuilderDesign() || RSX.rocket.CADET_I);
 veh.thrustNow = (pa, thr) => RSX.testVehicle.thrustNow(veh, pa, thr);
 veh.mdotNow = (pa, thr) => RSX.testVehicle.mdotNow(veh, pa, thr);
 veh.advanceBurn = (A, dtStep) => RSX.testVehicle.advanceBurn(veh, A, dtStep);
