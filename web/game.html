@@ -195,6 +195,56 @@
   }
   .prop-note { font-size: 10px; line-height: 1.4; color: var(--ink-muted); margin: 2px 0 0; }
 
+  /* ---- live telemetry graph panel: same --card/--border/--accent dark
+     language as #partPanel/#propPanel above. Redrawn every frame straight
+     from RSX.rocket.telemetry's own samples array (see initFlight's
+     drawTelemetryGraph()) -- no second parallel buffer. Anchored bottom-left
+     so it never overlaps #hud (top-left) or #propPanel (top-right). ---- */
+  #telemetryPanel {
+    position: fixed; z-index: 40; left: 12px; bottom: 12px; width: 360px;
+    max-width: calc(100vw - 24px);
+    background: var(--card); color: var(--ink-primary);
+    border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: 3px; box-shadow: var(--hud-shadow);
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    padding: 10px 12px 12px;
+  }
+  @media (max-width: 820px) { #telemetryPanel, #nadirCam { display: none; } }
+  #telemetryPanel .panel-title { margin: 0 0 6px; }
+  .telemetry-legend { display: flex; gap: 14px; margin-bottom: 6px; }
+  .telemetry-legend-item {
+    display: flex; align-items: center; gap: 5px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--ink-secondary);
+  }
+  .telemetry-legend-item i { width: 9px; height: 3px; border-radius: 2px; display: inline-block; }
+  .telemetry-legend-item.alt i { background: var(--stat-info); }
+  .telemetry-legend-item.vel i { background: var(--accent); }
+  .telemetry-legend-item b { color: var(--ink-primary); font-weight: 500; }
+  #telemetryGraph { display: block; position: static; width: 100%; height: 120px; }
+
+  /* ---- ground/nadir camera inset: a small circular downward-facing view
+     driven only by the real altitude + planet.R (see initFlight's
+     drawNadirCam()). Anchored bottom-right so it never overlaps the graph
+     (bottom-left), #hud (top-left) or #propPanel (top-right). ---- */
+  #nadirCam {
+    position: fixed; z-index: 40; right: 12px; bottom: 12px; width: 176px;
+    text-align: center;
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  #nadirCamCanvas {
+    position: static; display: block; margin: 0 auto; width: 176px; height: 176px;
+    border-radius: 50%; border: 1px solid var(--border-strong); box-shadow: var(--hud-shadow);
+    background: #05060A;
+  }
+  #nadirCamLabel {
+    margin-top: 6px; font-family: 'Barlow Condensed', sans-serif; font-weight: 700; font-size: 11px;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-secondary);
+  }
+  #nadirCamLabel span {
+    display: block; font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+    color: var(--accent); letter-spacing: 0; text-transform: none; margin-top: 2px;
+  }
+
 /* ---- Rocket Builder screen (merged from the former web/builder.html) ---- */
   :root {
     --bg: #12161a; --panel: #181d22; --card-hover: #262e37;
@@ -490,6 +540,18 @@
   <div id="ispChart"></div>
   <div class="prop-chart-label">Bulk Propellant Density (kg/m³)</div>
   <div id="densChart"></div>
+</div>
+<div id="telemetryPanel">
+  <div class="panel-title">Flight Telemetry</div>
+  <div class="telemetry-legend">
+    <span class="telemetry-legend-item alt"><i></i>ALT <b id="telAltVal">0 m</b></span>
+    <span class="telemetry-legend-item vel"><i></i>VEL <b id="telSpdVal">0 m/s</b></span>
+  </div>
+  <canvas id="telemetryGraph" width="640" height="120"></canvas>
+</div>
+<div id="nadirCam">
+  <canvas id="nadirCamCanvas" width="176" height="176"></canvas>
+  <div id="nadirCamLabel">NADIR VIEW<span id="nadirCamAltText">0 m</span></div>
 </div>
 <button id="btnBackToBuilder" type="button" title="Reloads the page">← BACK TO BUILDER</button>
 </div>
@@ -1008,6 +1070,30 @@ let running = false;
 let crashed = false, crashMsg = "";
 const starField = RSX.render.buildStarField(1536, 0xC0FFEE);
 
+// ---------------------------------------------------------------------
+// LIVE TELEMETRY + GROUND/NADIR CAM (display/recording additions only --
+// neither reads back into physics/control). Wires the already-built
+// RSX.rocket.telemetry recorder (previously created but never called from
+// the live flight) into this loop, and adds a live graph + a downward-
+// facing camera inset, both redrawn every frame in draw() below.
+const telemetryPanelEl = document.getElementById("telemetryPanel");
+const telGraphCanvas = document.getElementById("telemetryGraph");
+const telGraphCtx = telGraphCanvas.getContext("2d");
+const telAltValEl = document.getElementById("telAltVal");
+const telSpdValEl = document.getElementById("telSpdVal");
+const nadirCamEl = document.getElementById("nadirCam");
+const nadirCanvas = document.getElementById("nadirCamCanvas");
+const nadirCtx = nadirCanvas.getContext("2d");
+const nadirAltTextEl = document.getElementById("nadirCamAltText");
+
+const telemetryRecorder = RSX.rocket.telemetry.create({ design: design && design.name, planetId: planet.id });
+let liftoffLogged = false;          // alt crosses ~0.5m with vy>0 -- first time only
+let apogeeLogged = false;           // vy crosses + -> - well above the pad -- first time only
+let prevVyForApogee = null;
+let prevVxForAccel = null, prevVyForAccel = null; // previous frame's S.vx/S.vy, for the accelG estimate in draw()
+let lastCrashedForSnapshot = false; // edge-detects the crashed transition so the forced end-of-flight snapshot fires exactly once
+let lastNadirDebug = {};            // last computed nadir-cam geometry, exposed via RSXDEBUG.nadirCam for verification
+
 // Ignition sequence timing (design/visual-realism.md §4, timeline relative
 // to the ignition COMMAND -- i.e. the first Space/Z press while unlit): a
 // real countdown + throttle ramp instead of an instant step, so liftoff
@@ -1055,6 +1141,8 @@ window.RSXDEBUG = {
   get missionPhase() { return missionPhase; },
   get canCommitToMars() { return canCommitToMars; },
   get coastRemainingM() { return coastRemainingM; },
+  get telemetry() { return telemetryRecorder; },
+  get nadirCam() { return lastNadirDebug; },
 };
 
 // Computed-torque attitude controller (design/flight-physics.md §9.1): the
@@ -1079,6 +1167,8 @@ function resetToPad() {
   ctrl.throttle = 0; ctrl.gimbal = 0; ctrl.thetaCmd = Math.PI / 2;
   cache.valid = false; ignitionT = null; crashed = false; crashMsg = "";
   countdownStart = null; commandedThrottle = 0; rampComplete = false; // full sequence reset, not just the pad-pin
+  liftoffLogged = false; apogeeLogged = false; prevVyForApogee = null; // fresh ascent -> telemetry events can fire again
+  prevVxForAccel = null; prevVyForAccel = null; lastCrashedForSnapshot = false;
   // Refill to the TANK'S OWN capacity, not a hardcoded 4600: after an engine/fuel
   // swap (below) propMassFull changes with the fuel's bulk density, and R must
   // refill to THAT capacity or a reset after swapping fuels would silently load
@@ -1135,6 +1225,12 @@ function arriveAtMars() {
   ignitionT = simTime - 0.5; rampComplete = true; // already mid-flight/"hot" -- no ground-style T-6 countdown for a relight (same convention RSXSetState uses for a debug teleport)
   cache.valid = false; crashed = false; crashMsg = "";
   missionPhase = "mars";
+  // Arrives already airborne (a coast, not a ground launch) -- liftoff/apogee
+  // are ascent-from-a-pad events that don't apply to this descent-only leg,
+  // and prevV*ForAccel is reset so the discontinuous state jump above never
+  // reads as one enormous, fabricated accelG spike in the telemetry graph.
+  liftoffLogged = true; apogeeLogged = true; prevVyForApogee = null;
+  prevVxForAccel = null; prevVyForAccel = null; lastCrashedForSnapshot = false;
   marsArrivalSnapshot = { ry: S.ry, vy: S.vy, propMass: veh.parts.find(p => p.name === "tank").propMass };
 }
 function resetToMarsArrival() {
@@ -1144,6 +1240,8 @@ function resetToMarsArrival() {
   ctrl.throttle = 0; ctrl.gimbal = 0; ctrl.thetaCmd = Math.PI / 2;
   commandedThrottle = 0; countdownStart = null; ignitionT = simTime - 0.5; rampComplete = true;
   cache.valid = false; crashed = false; crashMsg = "";
+  liftoffLogged = true; apogeeLogged = true; prevVyForApogee = null;
+  prevVxForAccel = null; prevVyForAccel = null; lastCrashedForSnapshot = false;
   veh.parts.find(p => p.name === "tank").propMass = marsArrivalSnapshot.propMass;
   veh.mp = RSX.massProps(veh.parts);
   particles.n = 0;
@@ -1216,7 +1314,7 @@ function updateIgnitionSequence(simTimeNow, dt) {
     spawnPreIgnitionEffects(dt, tRel);
     return;
   }
-  if (ignitionT == null) ignitionT = simTimeNow; // T-0 reached this frame -- unchanged "engine lit" moment
+  if (ignitionT == null) { ignitionT = simTimeNow; telemetryRecorder.event(simTimeNow, "ignition", "Ignition"); } // T-0 reached this frame -- unchanged "engine lit" moment
   const rampFrac = RSX.clamp(tRel / THROTTLE_RAMP_S, 0, 1);
   const eased = 0.5 - 0.5 * Math.cos(Math.PI * rampFrac); // smooth 0->1 raised-cosine ease-in-out -- slowest at both ends, fastest through the midpoint (not linear, not an instant step)
   ctrl.throttle = commandedThrottle * eased;
@@ -1286,6 +1384,8 @@ function stepPhysics(dtWall) {
       crashMsg = impactSpeed > 6
         ? `IMPACT at ${impactSpeed.toFixed(1)} m/s (legs rated ~6 m/s) -- press R to reset`
         : `Landed at ${impactSpeed.toFixed(1)} m/s -- press R to reset`;
+      // Same survivable-vs-destructive distinction crashMsg above just made.
+      telemetryRecorder.event(simTime, impactSpeed > 6 ? "impact" : "landed", crashMsg);
       cache.valid = false;
       return;
     }
@@ -1363,7 +1463,17 @@ function drawCoastScreen() {
 
 const GROUND_COLOR = { home: "#3A3E33", mars: "#9C5A44" }; // Mars: iron-oxide rust, not Earth's dark olive
 function draw(t, dtWall) {
-  if (missionPhase === "coast") { drawCoastScreen(); return; }
+  if (missionPhase === "coast") {
+    // No meaningful "ground" during the abstracted interplanetary coast --
+    // hide both live-flight panels rather than let them sit frozen on
+    // stale pre-coast numbers (§ hard rule: never show stale/garbage data).
+    telemetryPanelEl.style.display = "none";
+    nadirCamEl.style.display = "none";
+    drawCoastScreen();
+    return;
+  }
+  telemetryPanelEl.style.display = "";
+  nadirCamEl.style.display = "";
   const alt = Math.hypot(S.rx, S.ry) - planet.R;
   const speed = Math.hypot(S.vx, S.vy);
   const { localX, localY } = padLocalXY();
@@ -1371,6 +1481,46 @@ function draw(t, dtWall) {
   const pa = RSX.atmosphere(alt, planet).P;
   const q = cache.valid ? cache.d.q : 0;
   const twr = (veh.thrustNow(pa, ctrl.throttle)) / (veh.mp.m * RSX.GRAVITY_REF);
+
+  // ---- telemetry sample + event capture (display/recording only -- reads
+  // frame state that already exists above, never feeds back into physics) ----
+  {
+    const machNow = cache.valid ? cache.d.mach : 0;
+    const smNow = (cache.valid && cache.d.SM != null) ? cache.d.SM : null;
+    // accelG: the vector change in S.vx/S.vy between consecutive frames
+    // (kinematic |Δv|/dt, in g), NOT thrust/mass. Chosen because it stays
+    // correct through every regime this loop already renders -- powered
+    // ascent, unpowered coast-up, descent, ground impact -- without a
+    // second, parallel "what the engine should be doing" estimate that
+    // could silently disagree with what actually happened to S.vx/S.vy
+    // (e.g. during an unpowered coast, thrust/mass would read a flat 0
+    // and hide the very deceleration this graph exists to show).
+    let accelG = 0;
+    if (prevVxForAccel != null && dtWall > 1e-6) {
+      accelG = Math.hypot(S.vx - prevVxForAccel, S.vy - prevVyForAccel) / dtWall / RSX.GRAVITY_REF;
+    }
+    prevVxForAccel = S.vx; prevVyForAccel = S.vy;
+
+    telemetryRecorder.sample({
+      t, alt, speed, vx: S.vx, vy: S.vy, accelG, q, mach: machNow,
+      throttle: ctrl.throttle, mass: veh.mp.m, prop: tankPart.propMass,
+      stage: 1, twr, pitchDeg: S.th * 180 / Math.PI, SM: smNow,
+    });
+
+    if (!liftoffLogged && alt >= 0.5 && S.vy > 0) {
+      telemetryRecorder.event(t, "liftoff", "Liftoff");
+      liftoffLogged = true;
+    }
+    if (!apogeeLogged && prevVyForApogee != null && prevVyForApogee > 0 && S.vy <= 0 && alt > 50) {
+      telemetryRecorder.event(t, "apogee", "Apogee");
+      apogeeLogged = true;
+    }
+    prevVyForApogee = S.vy;
+
+    telemetryRecorder.snapshotToSession(performance.now());
+    if (crashed && !lastCrashedForSnapshot) telemetryRecorder.snapshotToSession(performance.now(), true);
+    lastCrashedForSnapshot = crashed;
+  }
 
   // Track the vehicle's pad-local position (the frame everything below is
   // drawn in), not (0, alt): the vehicle drifts horizontally as soon as it
@@ -1544,6 +1694,141 @@ function draw(t, dtWall) {
     `${planet.name.toUpperCase()}  t=${fmtT(t,2)}  alt=${fmtT(alt,1)}m  v=${fmtT(speed,1)}m/s  throttle=${fmtT(ctrl.throttle*100,0)}%\n` +
     `pa=${fmtT(pa,0)}Pa  q=${fmtT(q,0)}Pa  TWR=${fmtT(twr,2)}  prop=${fmtT(tankPart.propMass,0)}kg\n` +
     (crashed ? crashMsg : (seqStatus || `[Z/SPACE] ignite  [X] cut  [R] reset`));
+
+  drawTelemetryGraph(alt, speed);
+  drawNadirCam(alt);
+}
+
+// Redrawn every frame straight from telemetryRecorder.samples (no second,
+// parallel buffer) -- altitude + velocity over roughly the last 60s of SIM
+// time, or the whole flight if shorter. This is the direct answer to
+// "I want to see what's changing"; it must visibly advance during a real
+// flight, not just exist statically.
+const TEL_GRAPH_WINDOW_S = 60;
+function drawTelemetryGraph(altNow, speedNow) {
+  const w = telGraphCanvas.width, h = telGraphCanvas.height;
+  telAltValEl.textContent = fmtT(altNow, 0) + " m";
+  telSpdValEl.textContent = fmtT(speedNow, 0) + " m/s";
+  telGraphCtx.clearRect(0, 0, w, h);
+
+  const style = getComputedStyle(telemetryPanelEl);
+  const colBorder = style.getPropertyValue("--border").trim() || "rgba(255,255,255,0.15)";
+  const colAlt = style.getPropertyValue("--stat-info").trim() || "#1D5FBF";
+  const colVel = style.getPropertyValue("--accent").trim() || "#D9601F";
+  const colInk = style.getPropertyValue("--ink-muted").trim() || "#8B8579";
+
+  const samples = telemetryRecorder.samples;
+  if (samples.length < 2) return; // nothing to plot yet -- pre-ignition / first couple of frames
+
+  const latestT = samples[samples.length - 1].t;
+  const t0 = Math.max(samples[0].t, latestT - TEL_GRAPH_WINDOW_S);
+  let startIdx = samples.length - 1;
+  while (startIdx > 0 && samples[startIdx - 1].t >= t0) startIdx--;
+  const win = samples.slice(startIdx);
+  if (win.length < 2) return;
+
+  let altMin = Infinity, altMax = -Infinity, velMin = Infinity, velMax = -Infinity;
+  for (const s of win) {
+    if (s.alt < altMin) altMin = s.alt; if (s.alt > altMax) altMax = s.alt;
+    if (s.speed < velMin) velMin = s.speed; if (s.speed > velMax) velMax = s.speed;
+  }
+  if (altMax - altMin < 1) { altMax += 1; altMin -= 1; }
+  if (velMax - velMin < 1) { velMax += 1; velMin -= 1; }
+  const tSpan = Math.max(win[win.length - 1].t - win[0].t, 0.001);
+  const px = s => ((s.t - win[0].t) / tSpan) * w;
+  const pyAlt = s => h - ((s.alt - altMin) / (altMax - altMin)) * h;
+  const pyVel = s => h - ((s.speed - velMin) / (velMax - velMin)) * h;
+
+  telGraphCtx.strokeStyle = colBorder; telGraphCtx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const y = Math.round((h / 4) * i) + 0.5;
+    telGraphCtx.beginPath(); telGraphCtx.moveTo(0, y); telGraphCtx.lineTo(w, y); telGraphCtx.stroke();
+  }
+
+  const plotLine = (yFn, color) => {
+    telGraphCtx.beginPath(); telGraphCtx.strokeStyle = color; telGraphCtx.lineWidth = 2;
+    win.forEach((s, i) => { const x = px(s), y = yFn(s); i === 0 ? telGraphCtx.moveTo(x, y) : telGraphCtx.lineTo(x, y); });
+    telGraphCtx.stroke();
+  };
+  plotLine(pyAlt, colAlt);
+  plotLine(pyVel, colVel);
+
+  telGraphCtx.fillStyle = colInk; telGraphCtx.font = "9px 'IBM Plex Mono', monospace";
+  telGraphCtx.fillText(`-${fmtT(win[win.length - 1].t - win[0].t, 0)}s`, 3, h - 3);
+  telGraphCtx.fillText("now", w - 22, h - 3);
+}
+
+// Ground/nadir camera inset: a stylized straight-down view driven ONLY by
+// the real altitude and planet.R already used above for physics/atmosphere
+// -- never an independent "camera altitude" of its own. The single anchor
+// is the planet's angular half-size as seen from this altitude,
+// asin(min(1, R/(R+alt))): near 90 degrees on the pad (the ground fills the
+// whole view) and shrinking toward 0 as altitude climbs into orbital range
+// (the whole planet's curvature comes into view). NADIR_FOV_HALF is a
+// FIXED, DOCUMENTED assumption for the inset's own (fictional) downward
+// lens -- the angle at which the mapped disc radius exactly equals the
+// inset's own radius, i.e. the pivot between "ground fills the frame" and
+// "planet shrinking in space". Nothing here is a canned animation: every
+// number below is derived from that one real angle.
+const NADIR_FOV_HALF = 35 * Math.PI / 180;
+const NADIR_PAD_RADIUS_M = 12; // illustrative launch-pad footprint radius, for the shrinking pad-marker cue at low altitude
+function drawNadirCam(altNow) {
+  const w = nadirCanvas.width, h = nadirCanvas.height;
+  const cx = w / 2, cy = h / 2, R = Math.min(cx, cy) - 2;
+  nadirCtx.clearRect(0, 0, w, h);
+  const a = Math.max(altNow, 0);
+  nadirAltTextEl.textContent = fmtT(a, 0) + " m ALT";
+
+  const angleHalf = Math.asin(Math.min(1, planet.R / (planet.R + a))); // 0..pi/2, the real horizon half-angle
+  const discPx = R * Math.tan(angleHalf) / Math.tan(NADIR_FOV_HALF); // uncapped -- see the ground-fill branch below
+  const mode = discPx >= R ? "ground" : "disc";
+  lastNadirDebug = { alt: a, angleHalfDeg: angleHalf * 180 / Math.PI, discPx, insetR: R, mode };
+
+  nadirCtx.save();
+  nadirCtx.beginPath(); nadirCtx.arc(cx, cy, R, 0, Math.PI * 2); nadirCtx.clip();
+
+  if (mode === "ground") {
+    // GROUND-FILL mode: close enough that the ground fills the whole inset
+    // -- the shrinking "pad marker" below (also derived from real altitude,
+    // via the pad's own apparent angular size atan(padRadius/alt)) is the
+    // altitude cue at this range, exactly like a real elevator-cam view of
+    // a launch pad receding below.
+    nadirCtx.fillStyle = GROUND_COLOR[planet.id] || GROUND_COLOR.home;
+    nadirCtx.fillRect(0, 0, w, h);
+    // Capped at 0.55*R (not 1.0*R) so the marker is always visibly a MARKER
+    // against the surrounding ground, even standing right on the pad, instead
+    // of saturating to a flat full-frame tint indistinguishable from no marker at all.
+    const padAngular = Math.min(Math.atan(NADIR_PAD_RADIUS_M / Math.max(a, 1)), NADIR_FOV_HALF);
+    const markerPx = Math.max(1.5, R * 0.55 * (padAngular / NADIR_FOV_HALF));
+    nadirCtx.fillStyle = "rgba(18,18,15,0.6)";
+    nadirCtx.beginPath(); nadirCtx.arc(cx, cy, markerPx, 0, Math.PI * 2); nadirCtx.fill();
+  } else {
+    // DISC mode: above the horizon-vs-FOV crossover -- the whole planet is
+    // now visibly smaller than the frame, on a black starfield, same as any
+    // real high-altitude/orbital nadir shot.
+    nadirCtx.fillStyle = "#05060A"; nadirCtx.fillRect(0, 0, w, h);
+    nadirCtx.globalAlpha = 0.6;
+    nadirCtx.drawImage(starField, 0, 0, 1536, 1536, 0, 0, w, h);
+    nadirCtx.globalAlpha = 1;
+    // Atmosphere rim: a TRANSITIONAL cue only -- fades in just after
+    // crossing into disc mode, fades back out once the disc has shrunk well
+    // below the frame, never present at both extremes.
+    const frac = RSX.clamp(discPx / R, 0, 1);
+    const atmAlpha = RSX.clamp(1 - Math.abs(frac - 0.5) / 0.5, 0, 1) * 0.8;
+    if (atmAlpha > 0.02) {
+      const rg = nadirCtx.createRadialGradient(cx, cy, Math.max(discPx * 0.92, 1), cx, cy, Math.max(discPx * 1.35, 2));
+      rg.addColorStop(0, `rgba(140,190,255,${(0.55 * atmAlpha).toFixed(3)})`);
+      rg.addColorStop(1, "rgba(140,190,255,0)");
+      nadirCtx.fillStyle = rg;
+      nadirCtx.beginPath(); nadirCtx.arc(cx, cy, Math.max(discPx * 1.35, 2), 0, Math.PI * 2); nadirCtx.fill();
+    }
+    nadirCtx.fillStyle = GROUND_COLOR[planet.id] || GROUND_COLOR.home;
+    nadirCtx.beginPath(); nadirCtx.arc(cx, cy, Math.max(discPx, 0.5), 0, Math.PI * 2); nadirCtx.fill();
+  }
+  nadirCtx.restore();
+
+  nadirCtx.strokeStyle = "rgba(255,255,255,0.18)"; nadirCtx.lineWidth = 1;
+  nadirCtx.beginPath(); nadirCtx.arc(cx, cy, R, 0, Math.PI * 2); nadirCtx.stroke();
 }
 function hexToRgbLocal(hex) {
   const h = hex.replace("#", "").replace(/^rgb\(|\)$/g, "");
@@ -1991,7 +2276,7 @@ window.RSXTick = function (dtWall, throttle) {
     draw(simTime, dtWall);
     return { crashed, crashMsg, missionPhase, coastRemainingM, alt: null, th: S.th, om: S.om };
   }
-  if (throttle != null) { ctrl.throttle = throttle; if (throttle > 0 && ignitionT == null) ignitionT = simTime; }
+  if (throttle != null) { ctrl.throttle = throttle; if (throttle > 0 && ignitionT == null) { ignitionT = simTime; telemetryRecorder.event(simTime, "ignition", "Ignition"); } }
   // Only a REAL (throttle==null, "let internal state evolve naturally")
   // tick goes through the countdown/ramp -- an explicit override keeps
   // instantly setting ctrl.throttle above, unchanged, so automated QA
